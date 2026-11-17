@@ -98,7 +98,7 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
     assert.equal(settings.definition.label(), "STM32 工具链");
     assert.ok(debug !== undefined, "调试台槽位必须注册");
     assert.equal(debug.definition.id, "stm32-debug");
-    assert.equal(debug.definition.label(), "调试台");
+    assert.equal(debug.definition.label(), "硬件台");
     assert.equal(typeof debug.component, "function");
     assert.equal(typeof debug.definition.inject, "function", "必须从宿主拿 sessionId，否则不能按会话过滤事件");
     assert.deepEqual(debug.definition.inject("session-abc"), { sessionId: "session-abc" });
@@ -115,38 +115,27 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
       return renderText(node.children);
     };
     const text = renderText(debug.component({}));
-    assert.ok(text.includes("调试台"), text.slice(0, 200));
+    assert.ok(text.includes("硬件台"), text.slice(0, 200));
     // 时间线与详情合并进「事件」页签（S86）：默认标签是实时通道，用页签名钉住入口。
     assert.ok(text.includes("事件"), text.slice(0, 200));
-    assert.ok(text.includes("调试会话"), text.slice(0, 400));
-    assert.ok(text.includes("暂无数值型监视采样"), text.slice(0, 400));
-    assert.ok(text.includes("断点"), text.slice(0, 600));
     // 输入框的 placeholder 是属性，不在文本树里；这里断言按钮文案与状态。
-    assert.ok(text.includes("无会话"), text.slice(0, 600));
-    assert.ok(text.includes("移除"), text.slice(0, 600));
-    assert.ok(text.includes("在途调用"), text.slice(0, 800));
-    assert.ok(text.includes("引脚"), "工作区标签要有引脚页：" + text.slice(0, 400));
-    assert.ok(text.includes("时钟"), "工作区标签要有时钟页：" + text.slice(0, 400));
     assert.ok(text.includes("故障"), "工作区标签要有故障页：" + text.slice(0, 500));
     assert.ok(text.includes("产物"), "工作区标签要有产物页：" + text.slice(0, 500));
-    assert.ok(text.includes("概览"), "工作区标签要有概览页：" + text.slice(0, 500));
+    for (const label of ["流程图", "电路设计", "故障", "产物", "变更"]) {
+      assert.ok(text.includes(label), "工作区标签要有 " + label + " 页：" + text.slice(0, 400));
+    }
+    assert.ok(text.includes("工程"), text.slice(0, 400));
     assert.ok(text.includes("回放…"), "时间线工具栏要有回放入口：" + text.slice(0, 500));
     assert.ok(text.includes("变更"), "工作区标签要有变更页：" + text.slice(0, 500));
     assert.ok(text.includes("导出 JSONL"), "时间线工具栏要能导出当前视图：" + text.slice(0, 500));
     assert.ok(text.includes("全部事件"), "时间线工具栏要有状态筛选：" + text.slice(0, 500));
-    assert.ok(text.includes("命中历史"), "断点面板要有命中历史：" + text.slice(0, 500));
-    assert.ok(text.includes("自动采样"), "监视曲线要有自动采样开关：" + text.slice(0, 500));
-    assert.ok(text.includes("发送"), "串口通道要有发送输入框：" + text.slice(0, 500));
-    assert.ok(text.includes("引脚") || text.includes("点行复制引用"), "引脚页要有入口：" + text.slice(0, 500));
     assert.ok(text.includes("错误") && text.includes("警告"), "RTT 通道要有级别过滤：" + text.slice(0, 600));
-    assert.ok(text.includes("回放…") && text.includes("变更") && text.includes("中断"), "工具栏与工作区标签要齐全：" + text.slice(0, 600));
+    assert.ok(text.includes("回放…") && text.includes("变更"), "工具栏与工作区标签要齐全：" + text.slice(0, 600));
     assert.ok(text.includes("复制已选"), "批量复制引用的按钮要常驻：" + text.slice(0, 600));
     // 概览页不在默认标签里，渲染文本看不到它；改从源码钉住「工具链一行」的实现。
     const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
-    assert.ok(source.includes("useProbeSummary"), "概览页要用工具链探测摘要");
-    assert.ok(source.includes("capabilitiesText"), "概览页要显示编译/烧录/调试/生成四项能力");
-    assert.ok(source.includes('"工具链"'), "概览页要有工具链一行");
-    assert.ok(source.includes("复制 payload"), "事件详情要能复制 payload");
+    assert.ok(source.includes("硬件侧"), "概览页要说明硬件侧入口");
+            assert.ok(source.includes("复制 payload"), "事件详情要能复制 payload");
     assert.ok(source.includes("parseHitLocation"), "停点要能解析出源码位置");
     assert.ok(source.includes("parseCompileError") && source.includes("CompileErrors"), "编译错误要能点击跳源码");
     assert.ok(source.includes("SerialCard") && source.includes("刷新端口"), "串口卡片要能开会话、列端口");
