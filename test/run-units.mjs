@@ -53,6 +53,7 @@ const suites = [
   "project-conf-units.test.mjs",
   "project-layout-units.test.mjs",
   "schema-subset-units.test.mjs",
+  "tool-contract-units.test.mjs",
   "schematic-units.test.mjs",
   "session-context-units.test.mjs",
   "session-units.test.mjs",

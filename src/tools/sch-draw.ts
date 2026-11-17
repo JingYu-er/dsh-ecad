@@ -371,6 +371,7 @@ export function registerSchDrawTools(ctx: DshContext): void {
       },
     },
     isConcurrencySafe: () => false,
+    timeoutMs: 180_000,
     async execute(args, exec) {
       const shaped = args as { projectDir?: string; boardFile?: string; schematicFile?: string; apply?: boolean };
       const project = await resolveProjectDir(ctx, shaped.projectDir, exec);

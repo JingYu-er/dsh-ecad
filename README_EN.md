@@ -154,7 +154,7 @@ The `conversation.view` tab "硬件台" (Hardware console) sits next to the firm
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 21 suites / 336 pass
+node test/run-units.mjs     # 22 suites / 339 pass (incl. tool contract and schema-subset guards)
 npm run test:pack
 npm run test:size
 ```

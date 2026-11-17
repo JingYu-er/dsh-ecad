@@ -195,7 +195,7 @@ async function collectTools() {
 
 test("schema 子集：全部工具的参数与输出都只用宿主 0.2.2 放行的关键字", async () => {
   const tools = await collectTools();
-  assert.ok(tools.length >= 25, "注册到的工具太少（实际 " + String(tools.length) + "），apply 可能没跑完");
+  assert.equal(tools.length, 42, "注册到的工具数与 README 不一致（实际 " + String(tools.length) + "）");
   const problems = [];
   for (const def of tools) {
     for (const violation of schemaViolations(def.parameters)) problems.push(def.name + " [parameters] " + violation);
@@ -248,7 +248,7 @@ test("真值对齐：宿主真校验器与本测试镜像对同一批 schema 结
     console.log("跳过：asar 里没找到 dsh-tools 的 json-schema.js（安装布局可能变了）");
     return;
   }
-  const dir = mkdtempSync(join(tmpdir(), "dsh-stm32-schema-"));
+  const dir = mkdtempSync(join(tmpdir(), "dsh-ecad-schema-"));
   // 宿主模块 import 两个内部包（@deepseek-ai/dsh-llm 的 HarnessError、
   // @deepseek-ai/dsh-util-values 的 isJsonValue/assertNever）。这里用行为等价的小桩替换，
   // 否则要顺带抽整棵依赖树。桩只服务于"校验结论"，与业务无关。

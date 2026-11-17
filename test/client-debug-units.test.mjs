@@ -94,10 +94,10 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
     const settings = registered.find((item) => item.definition.name === "settings.section");
     const debug = registered.find((item) => item.definition.name === "conversation.view");
     assert.ok(settings !== undefined, "设置面板槽位不能丢");
-    assert.equal(settings.definition.id, "stm32");
+    assert.equal(settings.definition.id, "ecad");
     assert.equal(settings.definition.label(), "STM32 工具链");
     assert.ok(debug !== undefined, "调试台槽位必须注册");
-    assert.equal(debug.definition.id, "stm32-debug");
+    assert.equal(debug.definition.id, "ecad-hardware");
     assert.equal(debug.definition.label(), "硬件台");
     assert.equal(typeof debug.component, "function");
     assert.equal(typeof debug.definition.inject, "function", "必须从宿主拿 sessionId，否则不能按会话过滤事件");

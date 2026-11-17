@@ -2,6 +2,17 @@
 
 > **2026-11-17 拆分记录（S185）**：硬件侧已从 `dsh-stm32` 拆出，独立为 `dsh-ecad`（0.1.0）。本文档 S1–S189 是拆分前的完整历史（含固件侧条目），S90 起主要是硬件侧；固件侧现状以 `dsh-stm32` 仓库为准。共享核心（KiCad 解析、工程目录约定、工具链定位、原子写）按约定两边各自拷贝，本仓库版本是硬件侧使用的拷贝。
 
+### 一百九十三、工具链路守卫：注册面、命名、schema 子集与撞名一起查（S186）
+
+拆分时把固件侧的 `schema-guard.mjs` 与 `tool-contract-units.test.mjs` 一起删掉了，结果是「工具注册错一个字段、两台机器上少一个工具」这类问题只能靠真机发现。补两份离线守卫：
+
+- `test/tool-contract-units.test.mjs`：用 stub ctx 跑一遍 `apply`，核对工具清单（42 个，名字排序后与约定清单逐个相等）、名字唯一、每个工具都有 `description`/`parameters`/`output.schema`/`execute`、`timeoutMs` 与 `isConcurrencySafe` 都给了明确值，并在同级目录存在 `dsh-stm32` 时从它的源码里抓 `_TOOL` 名做交集——**两个插件同时装的前提是工具名不重叠**。
+- `test/schema-subset-units.test.mjs`：与宿主 0.2.2 的子集规则等价的镜像校验器，扫全部工具的 `parameters` 与 `output.schema`；本机能找到 `app.asar` 时再抽出宿主真正的 `json-schema.js` 跑同一批 schema 做真值对齐，防止镜像漂移。
+
+首次跑就抓到一个真缺口：`stm32_sch_sync` 没写 `timeoutMs`（其它 41 个都有），已补 `180_000`。
+
+教训：**测试删掉时，它守的那类问题不会一起消失**。拆分要删固件逻辑，但注册面的检查属于插件自身，必须留下来。
+
 
 > 这是 0.1.0 发布前的开发记录：里程碑、宿主契约踩坑、19 个工具的实现细节、A1–A13 验收与宿主侧复验。
 > 面向使用者的说明已移到仓库根目录的 [README.md](../README.md)。
