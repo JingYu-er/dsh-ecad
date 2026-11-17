@@ -226,7 +226,7 @@ test("handleWebApi：探测与安装计划的入参校验在动手之前", async
   assert.match(String(badPkg.body.error), /不能以 - 开头/u);
 });
 
-test("WEB_API_PATHS：六十三条路由都在前缀下，且没有重复", () => {
+test("WEB_API_PATHS：六十八条路由都在前缀下，且没有重复", () => {
   assert.equal(WEB_API_PATHS.length, 68);
   assert.equal(new Set(WEB_API_PATHS).size, 68);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/power"), true);
@@ -242,11 +242,11 @@ test("WEB_API_PATHS：六十三条路由都在前缀下，且没有重复", () =
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/emc"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/links"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/gerber"), true, "制造文件回看必须有独立路由");
-  assert.equal(WEB_API_PATHS.includes("/dsh-stm32/api/ecad/bom"), true);
-  assert.equal(WEB_API_PATHS.includes("/dsh-stm32/api/ecad"), true);
-  assert.equal(WEB_API_PATHS.includes("/dsh-stm32/api/schematic/review"), true);
-  assert.equal(WEB_API_PATHS.includes("/dsh-stm32/api/ecad/action"), true);
-  assert.equal(WEB_API_PATHS.includes("/dsh-stm32/api/layout"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/bom"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/schematic/review"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/action"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/layout"), true);
   for (const route of WEB_API_PATHS) {
     assert.equal(route.startsWith(WEB_API_PREFIX + "/"), true, route);
   }
@@ -1332,7 +1332,7 @@ test("没有会话目录时不再退到「最近用过的工程」（S91 撤掉�
   fs.writeFileSync(path.join(home, "last-workspace.txt"), root + "\n", "utf8");
 
   setSessionWorkspaceResolver(null);
-  const res = await handleWebApi({ method: "GET", path: "/dsh-stm32/api/pinout", query: {}, deps: { subprocess: fakeSubprocess, env: { DSH_STM32_HOME: home } } });
+  const res = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/pinout", query: {}, deps: { subprocess: fakeSubprocess, env: { DSH_STM32_HOME: home } } });
   assert.equal(res.status, 400, "备忘文件属于上一轮工作区，不能当成本会话的工程");
   assert.match(String(res.body.error), /projectDir 不能为空/u);
 });
@@ -1614,21 +1614,21 @@ test("registerWebRoutes：host 的 dispatch 表里真的有板图路由（S151 �
     },
   };
   registerWebRoutes(ctx);
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/pcb"), true, "少了这条，浏览器只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/bom"), true, "少了这条，BOM 只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/stackup"), true, "少了这条，叠层只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/emc"), true, "少了这条，EMC 只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/power"), true, "少了这条，电源预算只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/brief"), true, "少了这条，需求文档只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/mech"), true, "少了这条，机械只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/parts"), true, "少了这条，器件搜索只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/impedance"), true, "少了这条，阻抗规则只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/netgate"), true, "少了这条，一致性门禁只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/schematic/sync"), true, "少了这条，补封装只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/render3d"), true, "少了这条，3D 预览只会看到 404");
-  assert.equal(registered.includes("/dsh-stm32/api/ecad/swap"), true, "少了这条，换封装只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/pcb"), true, "少了这条，浏览器只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/bom"), true, "少了这条，BOM 只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/stackup"), true, "少了这条，叠层只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/emc"), true, "少了这条，EMC 只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/power"), true, "少了这条，电源预算只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/brief"), true, "少了这条，需求文档只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/mech"), true, "少了这条，机械只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/parts"), true, "少了这条，器件搜索只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/impedance"), true, "少了这条，阻抗规则只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/netgate"), true, "少了这条，一致性门禁只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/schematic/sync"), true, "少了这条，补封装只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/render3d"), true, "少了这条，3D 预览只会看到 404");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/swap"), true, "少了这条，换封装只会看到 404");
   assert.equal(registered.length, 68);
-  assert.equal(registered.includes("/dsh-stm32/api/ecad"), true);
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad"), true);
 });
 
 test("GET /ecad/power：电源网络与线宽判据都在报告里，缺工程时 400（S160）", async () => {
@@ -1653,7 +1653,7 @@ test("GET /ecad/power：电源网络与线宽判据都在报告里，缺工程�
     );
     const okReply = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/power",
+      path: WEB_API_PREFIX + "/ecad/power",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1667,7 +1667,7 @@ test("GET /ecad/power：电源网络与线宽判据都在报告里，缺工程�
 
     const badReply = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/power",
+      path: WEB_API_PREFIX + "/ecad/power",
       query: {},
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1696,7 +1696,7 @@ test("GET/POST /ecad/brief：先看三份文档在不在，POST 才写出骨架�
     );
     const first = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/brief",
+      path: WEB_API_PREFIX + "/ecad/brief",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1709,7 +1709,7 @@ test("GET/POST /ecad/brief：先看三份文档在不在，POST 才写出骨架�
 
     const written = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/ecad/brief",
+      path: WEB_API_PREFIX + "/ecad/brief",
       query: { projectDir: dir },
       body: JSON.stringify({ write: true }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -1720,7 +1720,7 @@ test("GET/POST /ecad/brief：先看三份文档在不在，POST 才写出骨架�
 
     const again = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/ecad/brief",
+      path: WEB_API_PREFIX + "/ecad/brief",
       query: { projectDir: dir },
       body: JSON.stringify({ write: true }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -1729,7 +1729,7 @@ test("GET/POST /ecad/brief：先看三份文档在不在，POST 才写出骨架�
 
     const badReply = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/brief",
+      path: WEB_API_PREFIX + "/ecad/brief",
       query: {},
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1764,7 +1764,7 @@ test("GET/POST /ecad/mech：读板框与定位孔，POST 才写 DXF（S162）", 
     );
     const read = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/mech",
+      path: WEB_API_PREFIX + "/ecad/mech",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1779,7 +1779,7 @@ test("GET/POST /ecad/mech：读板框与定位孔，POST 才写 DXF（S162）", 
 
     const exported = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/ecad/mech",
+      path: WEB_API_PREFIX + "/ecad/mech",
       query: { projectDir: dir },
       body: JSON.stringify({ export: true }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -1790,7 +1790,7 @@ test("GET/POST /ecad/mech：读板框与定位孔，POST 才写 DXF（S162）", 
 
     const badReply = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/mech",
+      path: WEB_API_PREFIX + "/ecad/mech",
       query: {},
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -1806,21 +1806,21 @@ test("GET /ecad：共享运行时与工程挂载分开报（S152）", async () =
   fs.mkdirSync(project, { recursive: true });
   const home = path.join(root, "home");
   const env = { ...process.env, DSH_STM32_HOME: home };
-  const first = await handleWebApi({ method: "GET", path: "/dsh-stm32/api/ecad", query: { projectDir: project }, deps: { subprocess: null, env } });
+  const first = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad", query: { projectDir: project }, deps: { subprocess: null, env } });
   assert.equal(first.body.ecad.runtime.ready, false, "运行时目录不存在时不能报就绪");
   assert.equal(first.body.ecad.runtime.bytes, 0);
   assert.equal(first.body.ecad.installed, false);
   const cli = path.join(home, "ecad-runtime", "node_modules", "tscircuit", "cli.mjs");
   fs.mkdirSync(path.dirname(cli), { recursive: true });
   fs.writeFileSync(cli, "// cli\n", "utf8");
-  const second = await handleWebApi({ method: "GET", path: "/dsh-stm32/api/ecad", query: { projectDir: project }, deps: { subprocess: null, env } });
+  const second = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad", query: { projectDir: project }, deps: { subprocess: null, env } });
   assert.equal(second.body.ecad.runtime.ready, true, "共享运行时存在即就绪，与工程是否挂载无关");
   assert.equal(second.body.ecad.runtime.linked, false, "工程没挂载要如实报 false");
 });
 
 test("GET /ecad/ipc：连不上 KiCad 时给人话，不抛（S153）", async () => {
   // 这个用例只验证信封与降级：本机 KiCad 若开着，会拿到 ok:true；没开则必须是带 error 的 ok:false。
-  const out = await handleWebApi({ method: "GET", path: "/dsh-stm32/api/ecad/ipc", query: {}, deps: { subprocess: null, env: process.env } });
+  const out = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/ipc", query: {}, deps: { subprocess: null, env: process.env } });
   assert.equal(out.status === 200 || out.status === 400, true);
   const ipc = out.body.ipc;
   assert.equal(typeof ipc.ok, "boolean");
@@ -1884,7 +1884,7 @@ test("GET /ecad/parts：命中缓存时不联网，空关键词 400（S163）", 
     const env = { ...process.env, DSH_STM32_HOME: home };
     const hit = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/parts",
+      path: WEB_API_PREFIX + "/ecad/parts",
       query: { q: "C8734" },
       deps: { subprocess: fakeSubprocess, env },
     });
@@ -1899,7 +1899,7 @@ test("GET /ecad/parts：命中缓存时不联网，空关键词 400（S163）", 
 
     const empty = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/parts",
+      path: WEB_API_PREFIX + "/ecad/parts",
       query: {},
       deps: { subprocess: fakeSubprocess, env },
     });
@@ -1996,7 +1996,7 @@ test("GET/POST /ecad/impedance：GET 只出规则文本，POST 才写进 .kicad_
 
     const dry = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/impedance",
+      path: WEB_API_PREFIX + "/ecad/impedance",
       query: { projectDir: dir, nets: "VBUS" },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -2010,7 +2010,7 @@ test("GET/POST /ecad/impedance：GET 只出规则文本，POST 才写进 .kicad_
 
     const written = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/ecad/impedance",
+      path: WEB_API_PREFIX + "/ecad/impedance",
       query: { projectDir: dir, nets: "VBUS" },
       body: JSON.stringify({ write: true }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -2025,7 +2025,7 @@ test("GET/POST /ecad/impedance：GET 只出规则文本，POST 才写进 .kicad_
 
     const missing = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/impedance",
+      path: WEB_API_PREFIX + "/ecad/impedance",
       query: {},
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -2040,7 +2040,7 @@ test("GET /ecad/netgate：没有板子时给人话，缺 projectDir 时 400（S1
   try {
     const empty = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/netgate",
+      path: WEB_API_PREFIX + "/ecad/netgate",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -2055,7 +2055,7 @@ test("GET /ecad/netgate：没有板子时给人话，缺 projectDir 时 400（S1
 
     const missing = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/ecad/netgate",
+      path: WEB_API_PREFIX + "/ecad/netgate",
       query: {},
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -2071,7 +2071,7 @@ test("GET/POST /schematic/edit：指令存盘，GET 读回来，缺端点 400（
     fs.mkdirSync(path.join(dir, "hardware", "circuit"), { recursive: true });
     const saved = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/schematic/edit",
+      path: WEB_API_PREFIX + "/schematic/edit",
       query: { projectDir: dir },
       body: JSON.stringify({ a: { ref: "R1", pin: "1" }, b: { ref: "C1", pin: "2" } }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -2085,7 +2085,7 @@ test("GET/POST /schematic/edit：指令存盘，GET 读回来，缺端点 400（
 
     const listed = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/schematic/edit",
+      path: WEB_API_PREFIX + "/schematic/edit",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: process.env },
     });
@@ -2095,7 +2095,7 @@ test("GET/POST /schematic/edit：指令存盘，GET 读回来，缺端点 400（
 
     const bad = await handleWebApi({
       method: "POST",
-      path: "/dsh-stm32/api/schematic/edit",
+      path: WEB_API_PREFIX + "/schematic/edit",
       query: { projectDir: dir },
       body: JSON.stringify({ a: { ref: "R1", pin: "1" } }),
       deps: { subprocess: fakeSubprocess, env: process.env },
@@ -2111,7 +2111,7 @@ test("GET /schematic/sync：没有手绘层就直说先 seed，缺 projectDir �
   try {
     const noProject = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/schematic/sync",
+      path: WEB_API_PREFIX + "/schematic/sync",
       query: {},
       deps: { subprocess: fakeSubprocess, env: {} },
     });
@@ -2119,7 +2119,7 @@ test("GET /schematic/sync：没有手绘层就直说先 seed，缺 projectDir �
 
     const missing = await handleWebApi({
       method: "GET",
-      path: "/dsh-stm32/api/schematic/sync",
+      path: WEB_API_PREFIX + "/schematic/sync",
       query: { projectDir: dir },
       deps: { subprocess: fakeSubprocess, env: {} },
     });

@@ -69,7 +69,7 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
   try {
     await import("../lib/client.js");
     assert.ok(loaded !== null, "client.js 必须调用 __ModuleLoader__.load");
-    assert.equal(loaded.id, "dsh-stm32");
+    assert.equal(loaded.id, "dsh-ecad");
     const exports = loaded.factory((name) => {
       if (name === "react") return React;
       if (name === "react/jsx-runtime") return { jsx: React.createElement, jsxs: React.createElement };
