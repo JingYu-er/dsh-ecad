@@ -3,13 +3,14 @@
  *
  * 我们不再自己写布线器：把 `drandyhaas/KiCadRoutingTools`（MIT）当作外部运行时，
  * 由它做平面、扇出、去耦、差分与布线，我们只负责调用、解析与呈现。
- * 运行时要落在一个固定目录（默认 `~/.dsh-stm32/kicad-routing-tools`），
+ * 运行时要落在一个固定目录（默认 `~/.dsh-ecad/kicad-routing-tools`），
  * 里面必须有 `py_router/autoroute.py` 与编译好的 `grid_router` 模块。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SubprocessService } from "../../../types.js";
 import { runCapture } from "../../subprocess-runner.js";
+import { ecadHome } from "../../ecad-home.js";
 
 export interface KrtRuntime {
   root: string;
@@ -55,9 +56,7 @@ const AUTHOROUTE_REL = join("py_router", "autoroute.py");
 export function krtRoot(env: Record<string, string | undefined> = process.env): string {
   const explicit = (env["DSH_STM32_KRT_ROOT"] ?? "").trim().replace(/\\/gu, "/");
   if (explicit !== "") return explicit;
-  const home = (env["DSH_STM32_HOME"] ?? "").trim().replace(/\\/gu, "/");
-  const base = home !== "" ? home : (env["USERPROFILE"] ?? env["HOME"] ?? "").trim().replace(/\\/gu, "/") + "/.dsh-stm32";
-  return base + "/kicad-routing-tools";
+  return ecadHome(env).replace(/\\/gu, "/") + "/kicad-routing-tools";
 }
 
 /** 运行时是否可用：脚本在即可用；Rust 模块可能装在 python 的 site-packages 里。 */
