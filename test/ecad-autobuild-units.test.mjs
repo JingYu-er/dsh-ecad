@@ -51,7 +51,8 @@ function fakeWorkspace(root) {
 
 test("运行时目录：环境变量优先，其次用户主目录", () => {
   assert.equal(ecadRuntimeDir({ DSH_STM32_ECAD_RUNTIME: "D:/rt" }), "D:/rt");
-  assert.equal(ecadRuntimeDir({ DSH_STM32_HOME: "D:/home" }), join("D:/home", "ecad-runtime"));
+  assert.equal(ecadRuntimeDir({ DSH_ECAD_HOME: "D:/home" }), join("D:/home", "ecad-runtime"));
+  assert.equal(ecadRuntimeDir({ USERPROFILE: "C:/Users/x" }), join("C:/Users/x", ".dsh-ecad", "ecad-runtime"));
   const fallback = ecadRuntimeDir({ USERPROFILE: "C:/Users/x" });
   assert.match(fallback, /ecad-runtime$/u);
 });

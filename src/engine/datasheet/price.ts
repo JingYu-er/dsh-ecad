@@ -14,6 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { lcscDetailUrl } from "./lcsc.js";
+import { ecadHome } from "../ecad-home.js";
 
 /** 一件商品的报价快照。 */
 export interface PriceQuote {
@@ -49,11 +50,9 @@ export interface PriceOptions {
 const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_GAP_MS = 800;
 
-/** 价格缓存文件：`DSH_STM32_HOME/prices.json` 优先，否则 `~/.dsh-stm32/prices.json`。 */
+/** 价格缓存文件：`<DSH_ECAD_HOME>/prices.json`，默认 `~/.dsh-ecad/prices.json`。 */
 export function priceCachePath(env: Record<string, string | undefined> = process.env): string {
-  const home = (env["DSH_STM32_HOME"] ?? "").trim();
-  const base = home !== "" ? home : join(env["USERPROFILE"]?.trim() || homedir(), ".dsh-stm32");
-  return join(base, "prices.json");
+  return join(ecadHome(env), "prices.json");
 }
 
 export function readPriceCache(path: string): PriceCache {

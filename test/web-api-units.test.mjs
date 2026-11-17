@@ -873,7 +873,7 @@ test("GET /ecad：共享运行时与工程挂载分开报（S152）", async () =
   const project = path.join(root, "proj");
   fs.mkdirSync(project, { recursive: true });
   const home = path.join(root, "home");
-  const env = { ...process.env, DSH_STM32_HOME: home };
+  const env = { ...process.env, DSH_ECAD_HOME: home };
   const first = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad", query: { projectDir: project }, deps: { subprocess: null, env } });
   assert.equal(first.body.ecad.runtime.ready, false, "运行时目录不存在时不能报就绪");
   assert.equal(first.body.ecad.runtime.bytes, 0);
@@ -949,7 +949,7 @@ test("GET /ecad/parts：命中缓存时不联网，空关键词 400（S163）", 
       }),
       "utf8",
     );
-    const env = { ...process.env, DSH_STM32_HOME: home };
+    const env = { ...process.env, DSH_ECAD_HOME: home };
     const hit = await handleWebApi({
       method: "GET",
       path: WEB_API_PREFIX + "/ecad/parts",

@@ -11,12 +11,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { ecadHome } from "./ecad-home.js";
 
 /** 备忘文件路径：默认 `~/.dsh-stm32/last-workspace.txt`，可用 DSH_STM32_HOME 覆盖根目录。 */
 export function workspaceMemoPath(env: NodeJS.ProcessEnv = process.env): string {
   const root = typeof env.DSH_STM32_HOME === "string" && env.DSH_STM32_HOME.trim() !== ""
     ? env.DSH_STM32_HOME.trim()
-    : join(homedir(), ".dsh-stm32");
+    : join(ecadHome());
   return join(root, "last-workspace.txt");
 }
 

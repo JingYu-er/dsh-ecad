@@ -12,6 +12,7 @@ import { dirname, join } from "node:path";
 
 import type { SubprocessService } from "../../types.js";
 import { runCapture } from "../subprocess-runner.js";
+import { ecadHome } from "../ecad-home.js";
 
 /** 运行时自描述的版本号：结构变了就加一，读到旧版本按"未就绪"处理。 */
 export const RUNTIME_META_VERSION = 1;
@@ -43,14 +44,11 @@ export interface EnsureRuntimeResult {
   readonly notes: readonly string[];
 }
 
-/** 共享运行时目录：`DSH_STM32_ECAD_RUNTIME` 优先，否则 `~/.dsh-stm32/ecad-runtime`。 */
+/** 共享运行时目录：`DSH_STM32_ECAD_RUNTIME` 优先，其次 `DSH_ECAD_HOME`，否则 `~/.dsh-ecad/ecad-runtime`。 */
 export function ecadRuntimeDir(env: Record<string, string | undefined> = process.env): string {
   const explicit = (env["DSH_STM32_ECAD_RUNTIME"] ?? "").trim();
   if (explicit !== "") return explicit;
-  const home = (env["DSH_STM32_HOME"] ?? "").trim();
-  if (home !== "") return join(home, "ecad-runtime");
-  const userHome = (env["USERPROFILE"] ?? env["HOME"] ?? "").trim();
-  return join(userHome === "" ? "." : userHome, ".dsh-stm32", "ecad-runtime");
+  return join(ecadHome(env as NodeJS.ProcessEnv), "ecad-runtime");
 }
 
 export function runtimeMetaFile(dir: string): string {

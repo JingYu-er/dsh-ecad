@@ -22,6 +22,7 @@ import {
   takeDroppedCount,
   type DebugEvent,
 } from "./event-bus.js";
+import { ecadHome } from "./ecad-home.js";
 
 /** 默认落盘间隔。一批之内的事件共用一个文件。 */
 export const EVENT_LOG_INTERVAL_MS = 30_000;
@@ -103,7 +104,7 @@ export function evidencePolicy(env: NodeJS.ProcessEnv = process.env): EvidencePo
 export function evidenceRoot(env: NodeJS.ProcessEnv = process.env): string {
   const custom = env.DSH_STM32_EVIDENCE;
   if (typeof custom === "string" && custom.trim() !== "") return path.resolve(custom.trim());
-  return path.join(homedir(), ".dsh-stm32", "evidence");
+  return path.join(ecadHome(), "evidence");
 }
 
 /** 会话键要能当目录名：只留安全字符，空的退回 unbound。 */

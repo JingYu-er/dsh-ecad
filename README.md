@@ -1,547 +1,189 @@
-# dsh-stm32
+# dsh-ecad
 
-[![GitHub stars](https://img.shields.io/github/stars/JingYu-er/dsh-stm32?color=4a6cf7)](https://github.com/JingYu-er/dsh-stm32)
-[![license](https://img.shields.io/github/license/JingYu-er/dsh-stm32)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows%2010%2F11-4a6cf7)](#已知限制)
-[![MCU](https://img.shields.io/badge/MCU-STM32%20family-4a6cf7)](#已知限制)
-[![version](https://img.shields.io/badge/version-0.1.8-orange)](https://github.com/JingYu-er/dsh-stm32/releases)
+[![license](https://img.shields.io/github/license/JingYu-er/dsh-ecad)](LICENSE)
+[![version](https://img.shields.io/badge/version-0.1.0-orange)](https://github.com/JingYu-er/dsh-ecad)
 
-STM32 全流程工具层，以 [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) 插件形式分发：68 个工具、7 条斜杠命令与 1 个随包下发的 SKILL，把「工具链探测 → 建工程 → 改 `.ioc`（含时钟）→ 生成代码 → 编译 → 烧录 → 调试 → 回读寄存器」这条链交给模型执行，另含串口交互（Windows）与会话内的「调试台」面板。
+STM32 硬件侧的 DSH 插件：原理图、PCB、制造文件、成本与体检。与固件插件 `dsh-stm32` 分工，二者通过工程内的 `dsh/mcu.json` 交换事实，工具名不重叠，可同时安装。
 
-在支持范围内，同一套工具从 F1 到 H7 用法一致；遇到不支持的芯片或功能，调用时会直接说明缺什么，不会给出一份猜出来的结果。
+作用范围从「写一份 circuit.tsx」到「交出可打样的 Gerber 与 BOM」：器件与封装取自 KiCad 官方库（缺了回退立创页面）、原理图与 PCB 由 tscircuit 生成、放置与布线交给 KiCad 生态工具、校验与成本由本插件自己算。
 
-| 能力面 | 覆盖范围 |
-| --- | --- |
-| 芯片族 | 27 个族：C0 / F0 / F1 / F2 / F3 / F4 / F7 / G0 / G4 / H5 / H7 / L0 / L1 / L4 / L4+ / L5 / MP1 / MP2 / N6 / U0 / U3 / U5 / WB / WB0 / WBA / WL / WL3 |
-| HAL 建工程 | 21 个单核族：C0 / F0 / F1 / F2 / F3 / F4 / F7 / G0 / G4 / H5 / H7 / L0 / L1 / L4 / L4+ / L5 / U0 / U3 / U5 / WBA / WL |
-| 寄存器建工程 | 21 族，均通过 create→build 编译矩阵 |
-| 时钟规划 | 18 族；其中 PLL1 为 H5 / U5 / WBA / L4+ |
-| `.ioc` 外设预设 | 按 CubeMX 官方数据派生：串口 / TIM PWM / ADC |
-| 寄存器名与位域 | F1 |
+## 与 dsh-stm32 的关系
 
-**English:** [README_EN.md](./README_EN.md)
-
-[快速开始](#快速开始最小验证空目录到灯在闪) · [工具参考](#工具参考) · [斜杠命令](#斜杠命令) · [调试台](#调试台面板) · [配置](#配置) · [已知限制](#已知限制) · [排错](#排错) · [规格书](docs/dsh-stm32-plugin-规格.md)
-
-## 它能做什么
-
-多数「让 AI 编写 STM32 代码」的方案止于代码层：产出一段 `main.c`，能否编译、烧录后灯是否按预期闪烁，仍要在 CubeMX、终端与调试器之间手工确认。模型看不到板子，也就无法对结果负责。
-
-本插件把硬件侧接入 DSH：`.ioc` 可读可改（事务 + 回滚），代码只写入 `USER CODE` 块，生成与编译返回真实报错行，烧录不与调试器抢占探针，烧录后读回寄存器状态。每一步都有可核对的结果（计划编号、`文件:行:列`、`Verified OK`、`GPIOC.ODR` 的 bit13，有寄存器表时直接给出 `ODR13=1`），模型据此决定下一步。
-
-| 环节 | 手工流程 | 本插件 |
+| | dsh-stm32（固件） | dsh-ecad（硬件） |
 | --- | --- | --- |
-| 建工程 | GUI 配置时钟树、引脚与工程参数，生成 CMake，手写 `launch.json` | `stm32_project_create` 约 2 秒产出模板工程（与 CubeMX GUI 产物一致，`.vscode` 内两份配置就位） |
-| 改配置 | GUI 修改后重新生成，担心 `USER CODE` 丢失 | `stm32_ioc_plan` 先出差异（不写盘）→ 确认 → `stm32_ioc_apply` 带校验、备份与失败回滚 |
-| 写代码 | 整文件编辑，易写入生成区，重新生成后丢失 | `stm32_code_patch` 只写 `USER CODE` 块，块外逐字节保留 |
-| 编译 | Keil，或自行维护 CMake 与 VS Code 任务 | `/stm32-build [目录] [--clean]` |
-| 烧录 | Keil，或手写 `tasks.json` 调 openocd | `/stm32-flash [目录]` |
-| 验证 | 断点调试，手工查看寄存器 | `stm32_regs_read` 回读状态：`GPIOC.ODR` 两次采样确认计数递增，`AFIO.MAPR` 确认 SWD 未被固件关闭 |
-| 调试 | 按 F5 手动下断点，结束再关会话 | `stm32_debug_run` 停在 `main` 抓取一次现场后释放探针；连续调试才开 `stm32_debug_session`，空闲自动关闭 |
+| 负责 | 工具链、`.ioc` 事务、建工程、生成、编译、烧录、调试、串口/RTT | 器件与封装、原理图、PCB、制造文件、BOM/成本、EMC/热/阻抗体检 |
+| 原理图 | 只读：读图、引脚表、规则检查、评审、`.ioc` 草案 | 可写：生成、手绘层增量、从 KiCad 吸收回源 |
+| 事实文件 | 写 `<工程>/dsh/mcu.json`（`dsh-mcu/1`） | 读 `mcu.json`；`board.json` 为规划中的反向通道 |
+
+两个插件各自拷贝共享核心（KiCad 解析、工程目录约定、工具链定位、原子写），不抽公共包。
+
+## 能力清单
+
+- **原理图**：解析 KiCad 10 `.kicad_sch`（实例变换、多页、网络），输出 SVG 与网表对账；手绘层可加导线、标名、克隆、挪位、放新器件，改动存成图纸本身而不碰生成目录。
+- **PCB**：从 `circuit.json` 读网表做放置（主控居中、接口沿边、小件贴大件）；自动布线用 KiCadRoutingTools（Rust 网格路由器）；局部修改走 KiCad 官方 IPC（编辑器在跑时）。
+- **制造**：Gerber 与钻孔回看成 SVG；STEP / GLB 导出；DXF 板框与定位孔；嘉立创工艺档写进 `.kicad_dru`。
+- **校验**：ERC / DRC / 可制造性、网表↔PCB 门禁（含手绘层差异）、EMC（载流线宽、回流覆盖、串扰、差分间距）、叠层与阻抗、功耗与电源树、3D 模型覆盖。
+- **成本**：BOM 分组（主选编号 + 替代料）、立创单价与库存按需查询、元件成本合计。
+- **器件**：型号/参数/立创编号搜索；按编号导入封装（KiCad 库优先，缺了从立创页面转）；封装引用的 3D 模型一并收进工程。
 
 ## 安装
 
-### 安装插件
-
-只需先具备 DSH 本体，工具链可以稍后补。
-
-```powershell
-dsh plugin --profile desktop add dsh-stm32
-```
-
-`dsh plugin` 等价于在 profile 目录执行 `pnpm add`，并把 `dsh-stm32` 写入该 profile 的 `dsh.profile.bundles`。安装后完全退出 DSH 再启动（插件层只在进程启动时加载）。
-
-- 校验：`dsh plugin --profile desktop why dsh-stm32` 显示 `0.1.8`
-- 卸载：`dsh plugin --profile desktop remove dsh-stm32`，随后重启 DSH
-- 装到 Web：把 `desktop` 换成 `web`
-
-### 补齐工具链
-
-插件装好后即可解析 `.ioc`、查看引脚 / 时钟 / 中断、预览计划；真正编译、烧录、调试时才需要编译器与探针工具。
-
-| 要做什么 | 需要什么 | 怎么补 |
-| --- | --- | --- |
-| 编译 | `arm-none-eabi-gcc`、`cmake`、`ninja` | `/stm32-setup` 一条命令装齐（MSYS2 + 工具链，约 300 MB），或自行安装后由插件自动发现 |
-| 烧录、调试 | `openocd`、`arm-none-eabi-gdb`（或 `gdb-multiarch`）、CMSIS-DAP / ST-Link 探针 | 同上；探针驱动由系统识别，无需额外配置 |
-| 生成代码、建 HAL 工程 | STM32CubeMX（含内置 JRE）与其固件包 | 从 ST 官网安装 CubeMX（需 ST 账号），插件自动定位安装位置；固件包在 CubeMX 包管理器内安装 |
-
-不确定缺什么时，先看诊断：
-
-```text
-/stm32-env      # 编译 / 烧录 / 调试 / 生成四项能力逐项列出缺件、安装位置与安装方式
-/stm32-setup    # 先出计划，确认后执行安装，结束后自检
-```
-
-`/stm32-env` 在没有装任何工具链时也能用：它只执行版本查询，不写盘、不联网。
-
-### 开工前检查
-
-```text
-/stm32-doctor
-```
-
-只读体检：工具链是否齐备、是否有残留的 openocd / gdb 进程占用探针、gdb 端口是否被占用、工程内 `.elf` 与 `.ioc` 是否就位、`.ioc` 是否存在会导致烧录后失联的配置。
-
-### 内置资源
-
-芯片型号到启动文件、设备宏、Flash / RAM 容量的映射，以及 `.ioc` 模板、链接脚本与寄存器表，随插件一起分发，安装后离线可用，不需要下载资源包。`stm32_assets verify` 校验完整性；报缺文件时按提示重装插件即可。
-
-### 从源码安装
-
-仅开发或需要改代码时使用。`npm install` 与 `npm run build` 的说明见[开发与测试](#开发与测试)。
-
-```powershell
-git clone https://github.com/JingYu-er/dsh-stm32.git
-cd dsh-stm32
-npm install --no-audit --no-fund   # 仅安装 typescript
-npm run build                      # tsc -> lib/，提交前必须执行
-```
-
-挂载到 profile 时用 `link:`，不要用 `file:`：
-
-```powershell
-cd "$env:USERPROFILE\.dsh\profiles\desktop"
-pnpm add "link:D:\path\to\dsh-stm32"
-
-# 在同一目录的 package.json 中把 "dsh-stm32" 追加到 dsh.profile.bundles
-# 随后重启 dsh（插件层只在进程启动时加载）
-```
-
-原因：`nodeLinker: hoisted` 下 `file:` 会被复制成真实目录，重新编译出的 `lib/` 不会被宿主读取，表现为「改完代码、重启仍为旧行为」。`link:` 读取工作区里的 `lib/`，改完仍需重启 DSH 重新加载。
-
-## 快速开始：最小验证（空目录到灯在闪）
-
-这条链路已在真板验证，全程由模型调用工具完成。各步使用同一套工具，闪灯只是最小样例。
-
-| 步 | 动作 | 工具 | 实测耗时 |
-| --- | --- | --- | --- |
-| 1 | 体检：工具链、被占用探针、端口、`.elf`、`.ioc` 告警 | `stm32_doctor` | 约 2 秒 |
-| 2 | 空目录建 CMake 工程骨架（含已配置 SWD 的 `.ioc`） | `stm32_project_create` | 约 2 秒 |
-| 3 | 按 `.ioc` 无头运行 CubeMX，产物落到 `Core/` | `stm32_generate` | 首次 130–175 秒；`.ioc` 与产物未变时跳过（小于 1 秒） |
-| 4 | 编译（首次自动 `cmake --preset`） | `stm32_build` | 配置约 5 秒 + 编译 3 秒 |
-| 5 | 只烧录：program + verify + reset | `stm32_flash` | 2.1–2.6 秒 |
-| 6 | 回读 `GPIOC.ODR`（或地址 `0x4001100C`），确认状态翻转 | `stm32_regs_read` | 0.4–1.3 秒 |
-
-第 6 步的符号写法依赖内置寄存器表；安装不完整时可改用地址 `0x4001100C`，报告中不会有寄存器名与位域解释。
-
-模型侧只需一句：「在 `D:\work\blink` 建一个 STM32F103C8T6 的闪灯工程，编译并烧录」。
-
-最小验证覆盖「建工程 → 生成 → 编译 → 烧录 → 回读」整条链路，没有闪灯专用步骤；真实项目走同一链路，差异在于 `.ioc` 里的外设数量、`USER CODE` 块数量与代码规模。
-
-| 完整项目中的操作 | 路径 | 验证状态 |
-| --- | --- | --- |
-| 外设配置：GPIO / 定时器 / USART / I2C / SPI / ADC / DMA / 中断 | `stm32_ioc_plan`（GPIO 按芯片引脚表校验）→ `stm32_ioc_apply` → `stm32_generate` | GPIO、时钟、SWD 已上板实测；其余外设机制相同，未逐项实测 |
-| 新增外设后补 HAL 源 | 在 `cmake/stm32cubemx/CMakeLists.txt` 的 `STM32_Drivers_Src` 中加入 `stm32f1xx_hal_<外设>.c`，或写入 `cmake/user/CMakeLists.txt` | 需手工补齐：插件只放置 `Src/` 与 `Inc/`，CubeMX 生成的 `cmake/**` 不搬运 |
-| 多源文件与自定义模块 | 写入 `cmake/user/CMakeLists.txt`，模板已留位置 | 位置就位，未单独实测 |
-| 业务代码 | `stm32_code_patch` 按块写入，重新生成时按标签搬回 | 已实测（追加 / 替换；标签写错时会列出全部可用标签） |
-| 调参、改时钟 | `.ioc` 事务：先出差异 → 校验 → 备份 → 失败回滚 | 已实测 |
-| 确认外设运行 | `stm32_regs_read` 读任意外设寄存器：符号名 `TIM2.CNT` / `USART1.SR` / `ADC1.DR`，或物理地址 `0x40000024`；只写外设名 `GPIOC` 时输出该外设全部寄存器 | 地址写法已上板实测；符号名与位域复测中 |
-| 查看现场 | `stm32_debug_run` 停在 `main` 抓取一次；连续调试用 `stm32_debug_session` + `stm32_debug_eval` | 已实测（停在 `main () at main.c:67`） |
-
-边界集中在[已知限制](#已知限制)：HAL 建工程覆盖 21 个单核族，寄存器建工程覆盖 21 族（验证板为 C8T6），宿主仅在 Windows 验证，探针默认 CMSIS-DAP，新增外设需手工补 HAL 源。外设种类不受工具限制：`.ioc` 里能配置的能力都走同一链路；除闪灯外的外设尚未逐项上板实测，正式开工前建议先执行 `/stm32-doctor`。
-
-## 工具参考
-
-### 环境与工程
-
-| 工具 | 用途 |
-| --- | --- |
-| `stm32_doctor` | 只读体检：工具链是否齐备、是否有残留 openocd / gdb、gdb 端口是否占用、`.elf` 与 `.ioc` 是否就位；按芯片输出能力与已知问题 |
-| `stm32_route_plan` | 按具体工程与需求评估 HAL 路线与寄存器路线的开发代价，并区分可自动安装与需人工安装的缺件 |
-| `stm32_env_install` | 安装 MSYS2 与工具链组件（gcc / gdb / openocd / cmake / ninja），默认只出计划，`dryRun:false` + `confirm:true` 才执行；只写用户级 PATH，不请求管理员权限 |
-| `stm32_download` | 只下载不安装：J-Link 官方直链 + 校验和；CubeMX / CubeProgrammer 打开官方页或校验本地文件 |
-| `stm32_firmware_install` | 下载并组装 STM32Cube 固件包，优先官方压缩包，失败回退 GitHub 拼包；默认只出计划 |
-| `stm32_assets` | 查看、校验、清理包内资源（芯片数据、`.ioc` 模板、链接脚本、启动文件、寄存器表） |
-| `stm32_cache` | 查看、校验、拉取、清理下载缓存（寄存器版 CMSIS 模板） |
-| `stm32_project_create` | 建工程：`route:"hal"` 用模板 + 固件包，`route:"register"` 建不依赖 CubeMX 的寄存器工程；两条路线均生成 `openocd.cfg` |
-| `stm32_project_export` | 工程打包为 zip，默认排除 `build/`、`.dsh-stm32/`、`node_modules/`、`.git/`，可附编译产物 |
-| `ecad_layout_fix` | 检查并把配置文件归位：工作区索引在 `<工作区>/.dsh-stm32/workspace.conf`、工程描述在工程根；默认只报计划，`apply=true` 才改文件（先备份 `.bak`） |
-
-### `.ioc`：查看与修改
-
-| 工具 | 用途 |
-| --- | --- |
-| `stm32_ioc_inspect` | 只读解析：型号、引脚、信号、使能外设、中断、时钟树、工程设置与风险提示 |
-| `stm32_ioc_plan` | 计算逐键差异（不写盘）：支持外设预设、引脚、中断、调试口、时钟规划与批量置键 |
-| `stm32_ioc_apply` | 写入计划：源文件校验 → 备份 → 原子替换；支持按备份回滚 |
-| `stm32_ioc_verify` | 由 CubeMX 自己重读 `.ioc`，指出被静默丢弃的外设与缺失的初始化 |
-
-### 流程图规则
-
-`diagram` 是功能框架，不是逐元件原理图：
-
-- 按功能聚合：主控、NFC 天线与标签、光检测、供电、调试接口、按键；模块内部连接不画线。
-- 连线只在模块之间，标签归纳为 I2C / SPI / UART / ADC / LED / PWM / SWD 这类总线名。
-- 电源网络（VCC、GND）单独列出，不进连线；端点过多的网络同样不进框图。
-- 布局由插件生成：主控居中、模块绕环，连线从面对对方的一侧进出，能直不拐。
-
-这些规则同时写在插件的技能文本里，读图与画图用的是同一套口径。
-
-### 原理图（KiCad 10）
-
-| 工具 | 用途 |
-| --- | --- |
-| `ecad_sch_read` | 只读解析 KiCad 工程：图纸树、元件、网络、电源网络，以及模块框图（哪两块电路相连、走什么总线） |
-| `ecad_sch_pins` | 主控引脚矩阵：每个脚的网络名、类型、是否悬空，并按 CubeMX 数据库给出可复用信号候选 |
-| `ecad_sch_check` | 检查原理图本身，并与 `.ioc`、`.kicad_pcb` 对账：缺值、缺封装、SWD / BOOT0 / 电源缺失、网络被拆开 |
-| `ecad_sch_to_ioc` | 把引脚连接转成 `.ioc` 配置草案：每个脚给出建议信号、置信度与候选，纯 GPIO 网络给输入/输出建议；硬件复用对不上时给软件模拟退路与代价；只读，不写 `.ioc` |
-
-版本范围是 KiCad 10（`version 20260306`）。元件库内嵌在图纸里，不要求安装 KiCad，也不读 `sym-lib-table`；只跟随根图纸引用到的子图，`.history/` 与其他历史版本不参与解析。对账判据是连通性：同一 PCB 网络上的焊盘，在原理图里必须属于同一网络；名字不一致只作提示。工具只读，不改原理图，也不改工程配置；`ecad_sch_to_ioc` 的草案要交给 `stm32_ioc_plan` 才落盘，且对不上库信号的脚会列在待确认里。
-
-### 电路设计（tscircuit + KiCad）
-
-在 `hardware/` 下用 tscircuit 写电路，导出真 KiCad 工程，再用 KiCad 自己的检查器验收。检查按嘉立创常规工艺进行：线宽与间距 ≥ 0.2 mm、孔径 ≥ 0.3 mm、丝印字高 ≥ 0.8 mm，规则写进工程的 `.kicad_dru`，报出来的是「能不能按这一档打板」，并附打样成本估算。
-
-| 工具 | 用途 |
-| --- | --- |
-| `stm32_ecad_init` | 建 `hardware/{circuit,kicad,libs,out}` 与最小 `package.json`；依赖走共享运行时（见下），不再每工程各装一份 |
-| `ecad_sch_review` | 原理图一键评审：读图、规则检查、配置草案与「需要人决策的脚」，只给结论不写盘 |
-| `stm32_ecad_design` | 一键设计：构建 → 合并焊盘（可选）→ 导库 → ERC/DRC → 可制造性与成本 → STEP 与制造文件，逐步报告；传 `pcb=true` 会在导库后自动布线（需预装 KiCadRoutingTools，缺引擎则跳过该步） |
-| `stm32_ecad_build` | 用 KiCad 自带的 bun 跑 `tsci build`：`.circuit.tsx` → `circuit.json`、SVG 与 `kicad/*.kicad_sch|.kicad_pcb`；并把 `tscircuit:` 生成名换回真库名（`footprint="kicad:…"` 时），官方封装复制进 `hardware/libs`；立创封装（`footprint="jlcpcb:C…"`）按位号固化进库并记在 `libs/sources.json`；构建前预检封装里同坐标的焊盘（USB-C 16P 的 A1/B12 这类），命中就跳过自动布线并忽略摆放间距告警，板子照常产出；需要把同坐标焊盘并成一个时，构建时传 `mergePads=true` |
-| `stm32_ecad_check` | 先补齐工程库表与嘉立创工艺规则（`<工程>.kicad_dru`），再跑 `kicad-cli sch erc` 与 `pcb drc`，把违规收敛成规则、级别与涉及项清单；顺带报出未命名网络、板子尺寸、最细走线、最小孔径与打样成本 |
-| `stm32_ecad_libs` | 把生成工程里内嵌的封装/符号抽成 `hardware/libs` 下的真库，并补齐 `fp-lib-table` / `sym-lib-table` |
-| `stm32_ecad_step` | 导出 STEP 到 `hardware/out`；先按「官方 3D 目录 → `hardware/libs/3d` → 缓存」解析模型并改写路径，缺模型只报告，不阻断导出 |
-| `stm32_ecad_export` | 一次导出 Gerber、钻孔、贴片坐标与 STEP 到 `hardware/out`，按最小可下单集合汇总 |
-| `ecad_ds_fetch` | 把非 STM32 器件的数据手册抓到本地缓存：按立创编号、按本工程用到的器件，或手工导入 PDF |
-| `ecad_ds_lookup` | 按用途查手册：引脚、绝对最大额定值、电气特性、时序、封装——给页号、标题与该页开头正文 |
-| `ecad_ds_list` | 列出本地手册缓存：编号、型号、占用、抓取时间与来源 |
-| `ecad_pdf_read` | 读 PDF：`info` 看页数与文字层、`text` 取指定页文字（保版面，表格可读）、`figures` 列图与表、`table` 把参数表切成行列、`render` 把页面或局部渲染成 PNG 交给视觉读图、`curve` 把曲线图数字化成可复核的 (x, y) 序列、`schematic` 列原理图的元件与网络标签（只给清单，不出网表） |
-| `stm32_pcb_place` | 按 circuit.json 的元件与网络计算落位，再改 `.kicad_pcb` 把元件搬到位（默认清掉旧走线，写盘前留 `.bak`）|
-| `stm32_pcb_autoroute` | 用 KiCadRoutingTools（Rust 网格布线器）铺平面、扇出并布线，回报未连接数；默认只出计划 |
-| `stm32_pcb_render` | 把 `.kicad_pcb` 画成 SVG 板图：板框、顶层与底层走线、焊盘、过孔、丝印；默认只回尺寸与计数，给 `saveAs` 才落盘 |
-| `stm32_emc` | EMC 体检：电源线按 IPC-2221 算所需线宽、查铺铜与参考平面、查换层过孔旁的地过孔；`deep` 再查差分对间距、回流路径覆盖与并行串扰 |
-| `stm32_stackup` | 算叠层与阻抗：板子没有叠层定义时按层数取嘉立创常规叠层，给 50 Ω 单端与 90/100 Ω 差分的线宽，并列出板上现有线宽 |
-| `stm32_bom` | 读 `circuit.json` 出 BOM：位号、数量、值、封装、立创编号与替代料；`prices` 为真才联网取价，`format=csv` 出嘉立创贴片列 |
-| `stm32_power` | 算电源树电流预算：每个电源网络的电压、电流、挂着的元件、最窄走线 vs IPC-2221 需求宽度；只合计你填的电流，估算另计，未填标待定 |
-| `stm32_pcb_links` | 布线体检：差分对长度差与过孔数、逐层铺铜与层上信号线数、去耦电容到 IC 电源脚的距离；只算几何与网络名，不做仿真 |
-| `stm32_pcb_3d` | 3D 预览：用 KiCad 的 `kicad-cli pcb render` 把板子渲成 PNG（顶/底/左右/前后、可透视与旋转），并把封装引用的 3D 模型里缺文件的位号点名出来（那些器件在 3D 里是空的）；缺模型时按族/引脚数/间距给出可换的官方封装（标出有没有 STEP）；`format: glb\|step` 直接导几何给网页与机械；面板「3D 预览」有顶/底/斜视三档与「导出 GLB/STEP」 |
-| `stm32_pcb_swap` | 换封装：把位号换成 KiCad 官方库里的封装，保留位号/值/位置/旋转并按焊盘编号搬网络；默认只预演，`apply` 才写盘（留 `.bak`）；焊盘尺寸变了会提示重布 |
-| `stm32_pcb_gerber` | 制造文件回看：把 `stm32_ecad_export` 导出的 Gerber 与钻孔读回来画成一张 SVG（可选层），交付前核对板框、铜、丝印与孔位；读不懂的构造计入 notes |
-| `stm32_impedance` | 阻抗写回：按叠层算出 50 Ω 单端与 90 Ω 差分该用的线宽与间距，写成 `.kicad_dru` 里的自定义规则（只作用于点名的网络）；KiCad 的 DRC 没有阻抗约束，写入的是可执行的几何量 |
-| `stm32_netgate` | 网表与 PCB 的持续门禁：图纸比板子新、网络拆开、焊盘缺失 |
-| `stm32_sch_import` | 从 KiCad 板子吸收改动回 `circuit.tsx`：只比网表与元件，坐标不保留（构建重排） |
-| `stm32_sch_edit` | 原理图人工编辑：指令存 `schematic-edits.json`，构建收尾重放；KiCad 10 的 IPC 不提供原理图读写 |
-| `stm32_board_info` | MCU 事实文件：把 `.ioc` 里的事实（型号/封装/时钟/调试口/引脚/外设/中断数）写进 `<工程>/dsh/mcu.json`（`schema: dsh-mcu/1`，带 `.ioc` 的 sha256 指纹与工程相对路径），别的插件只读它；默认只回事实，`write: true` 才落盘，`.ioc` 改过会报 `stale` 与原因 |
-| `stm32_sch_sync` | 手绘层新放的器件补到板子：读 `hardware/schematic/*.kicad_sch` 的位号/值/封装/网络，`planHandSync` 出计划，`apply: true` 时交 KiCad 自带 python 用 `FootprintLoad` 把封装 `Add` 进最近一次构建的 `.kicad_pcb`（写前留 `.bak`）；板上已有的位号跳过，`tscircuit:` 封装与没有 `Footprint` 的件不补，自动网名不赋；坐标暂定在板框下方，notes 会提醒布线前挪 |
-| `stm32_sch_draw` | 图纸手绘层：`wire` 连两脚、`label` 标名、`clone` 复制元件、`place` 从符号库放新器件（内嵌 `lib_symbols`）、`move`/`remove`；写 `hardware/schematic/*.kicad_sch`（构建不碰），不需要打开 KiCad，写完用 `kicad-cli` 导网表校验 |
-| `stm32_part_import` | 器件导入：按 `Lib:Name` 从 KiCad 官方库复制封装；库里没有且给了立创编号时，从立创页面取封装图形转成 `.kicad_mod`（`source=kicad` 可强制只查库）。按焊盘号生成符号骨架，立创编号写成封装属性（`LCSC`/`MPN`/`Brand`/`Datasheet`），封装引用的 3D 模型一并收进 `hardware/libs/3d` 并改写为 `${KIPRJMOD}` 相对路径，再登记 `fp-lib-table`/`sym-lib-table` |
-| `stm32_symbol_footprint` | 符号与封装生成：按引脚表出 `.kicad_sym`，按封装尺寸出 `.kicad_mod`（QFP / SOIC / 两脚小件）；尺寸与引脚号必须由调用方给出，缺一个就报错 |
-| `ecad_part_search` | 器件搜索：按型号、参数或立创编号查编号、库存、阶梯价与手册地址；结果缓存 24 小时，封装字段接口不给时留空 |
-| `stm32_mech` | 外壳与机械约束：板框尺寸、定位孔坐标与孔径、孔到边最小距离、面积；`export` 写 DXF（R12，外形 + 定位孔）给机械软件 |
-| `stm32_brief` | 生成需求与设计说明的三段骨架：`docs/01-MRD.md`（为什么做）、`02-hardware-PRD.md`（电气指标）、`03-design-brief.md`（按什么做）；主控、时钟、外设、板尺寸、元件成本自动填，需求与验收标准留「待定」不替人编，已有文件默认不覆盖 |
-| `stm32_pcb_ipc` | 在**已打开的 KiCad PCB 编辑器**里做局部编辑：看板况、按位号移元件、布一段线、加过孔、重铺铜、保存；走 KiCad 官方 IPC，改动能被 Ctrl+Z 撤销。默认只回计划，`apply: true` + `expectBoard` 才动板子；连不上时自动用 pcbnew 打开本工程的板子并等就绪（`open: false` 可关） |
-| `stm32_pcb_route` | 网格 A* 布线（0.5 mm 栅格）：按网络逐张布、避开已有焊盘与走线；默认预览，`apply: true` 才写盘（写完必须跑 DRC） |
-| `stm32_ecad_package` | 把 `hardware/` 打成可交付 zip（跳过 `node_modules`、`dist`、`.history`），写完读回自检 |
-
-写者只有一个：`.kicad_sch` / `.kicad_pcb` 由 tscircuit 生成，插件只读。tscircuit 把符号与封装内嵌在工程里、名字归到 `tscircuit` 之类的生成名，检查前会先导出成 `hardware/libs` 下的真库并补齐库表，否则报告里只剩「库不在配置中」这类环境噪音；未命名网络（`.R1 > .pin1 to .C1 > .pin1`）会单独列出并给出 `<net name="VDD" />` 的修法。构建要求 KiCad 10 与其自带的 `bun.exe`。
-
-依赖只装一次：`tscircuit` 与 `typescript` 装在共享运行时 `~/.dsh-stm32/ecad-runtime`（可用 `DSH_STM32_ECAD_RUNTIME` 改位置），各工程的 `hardware/circuit/node_modules` 用目录联接指向它——ESM 解析要求 `node_modules` 出现在工程树里，联接满足这一点，磁盘只占一份（约 730 MB）。首次是否自动安装由 `DSH_STM32_ECAD_AUTO_INSTALL` 决定：`auto` 直接装、`off` 从不装、缺省 `ask` 只提示命令。
-
-改完电路源码、本轮对话结束时，插件会**自动构建一次**（只构建与检查，不导出成品），这样回到 KiCad 就能看到最新的原理图与 PCB。三条约束：只在源码比产物新或上次失败时跑、每回合最多一次、两次之间至少 60 秒；最近一次结果写在面板头（「自动构建 MM-DD HH:mm · 通过/有问题」）与 `<工程>/.dsh-stm32/ecad-state.json`。板子上的元件优先用 KiCad 官方库（`footprint="kicad:..."`），需要时再用立创编号兜底。
-
-PCB 布线用外部引擎 `KiCadRoutingTools`（MIT，Rust 网格布线器）。它不在插件包里，装一次、所有工程共用：
-
 ```bash
-git clone --depth 1 https://github.com/drandyhaas/KiCadRoutingTools ~/.dsh-stm32/kicad-routing-tools
-# Rust 模块：python build_router.py 会下载预编译二进制；GitHub API 限流时直接下 release 的 grid_router-windows-x86_64.pyd
-# 把它放进 KiCad python 的 Lib/site-packages（子进程要能 import 到）
-"D:/app/KiCad/10.0/bin/python.exe" -m pip install numpy scipy shapely
+dsh plugin --profile desktop add dsh-ecad
 ```
 
-位置可用 `DSH_STM32_KRT_ROOT` 改。装好后 `stm32_pcb_autoroute` 才能跑；没装时该工具直接报一句「还没安装」，其余功能不受影响。
+安装后完全退出 DSH 再启动（插件层只在进程启动时加载）。
 
-设计规则跟着**铜层数**取嘉立创常规档：1–2 层 0.127 mm、多层 0.10 mm，与布线器的工艺档同表。布线与 DRC 用同一档，`clearance` 才不会整板误报；写成 `.kicad_dru` 的判定阈值再减 0.003 mm 的量化余量（布线器在栅格上落线，实测最少 0.0974 mm）。实测（41 元件 / 35 网络 / 4 层板，一键设计带布线）未连接 0，DRC 从 259 错降到 **0 错 / 132 警**，构建 52 秒、布线 32 秒。
+- 校验：`dsh plugin --profile desktop why dsh-ecad` 显示 `0.1.0`
+- 卸载：`dsh plugin --profile desktop remove dsh-ecad`，随后重启 DSH
 
-### 代码与构建
+外部依赖（缺哪个，对应工具会说明缺什么）：
 
-| 工具 | 用途 |
-| --- | --- |
-| `stm32_code_patch` | 只写 `USER CODE BEGIN/END` 块内内容，块外逐字节保留；写前备份 |
-| `stm32_generate` | 无头运行 CubeMX，产物落到 `Core/`，`USER CODE` 按标签搬回；`.ioc` 未变时跳过 |
-| `stm32_build` | 编译：自动推断构建目录与 `.elf`，返回错误行、警告数、FLASH / RAM 占用；可转出 hex / bin |
+| 依赖 | 用途 | 缺失时 |
+| --- | --- | --- |
+| KiCad 10（`kicad-cli`、`pcbnew`、官方库） | 生成工程、ERC/DRC、Gerber、3D、封装与符号库 | 构建与校验不可用 |
+| Node.js + 共享运行时（tscircuit） | 把 `circuit.tsx` 编成 KiCad 工程 | 首次构建时提示安装；装在 `~/.dsh-ecad/ecad-runtime`，全机一份 |
+| KiCadRoutingTools | 自动布线 | 布线步骤记为「跳过」，不算失败 |
+| poppler（`pdftotext`） | 手册取文字与表格 | PDF 工具提示安装去向 |
 
-### 烧录、调试与运行时
+## 快速开始
 
-| 工具 | 用途 |
-| --- | --- |
-| `stm32_flash` | 只烧录：program + verify + reset，烧完释放探针；烧前检查 Serial Wire；失败时给出探针错误的分类与处理建议 |
-| `stm32_debug_run` | 烧录后停在 `main`，抓取寄存器、调用栈与局部变量，随后复位运行并释放探针 |
-| `stm32_debug_session` | 开启长调试会话（空闲与总时长受限），供 `stm32_debug_eval` 连续使用 |
-| `stm32_debug_eval` | 在调试会话中执行 gdb 命令：读变量、寄存器、调用栈、内存 |
-| `stm32_debug_stop` | 关闭调试会话并释放探针 |
-| `stm32_regs_read` | 按地址或符号名读寄存器，有寄存器表时解析位域；读取时短暂暂停，读完继续运行，不复位芯片 |
-| `stm32_watch` | 登记表达式并采样（含差值）；`kind=write/read/access` 装为硬件观察点，受芯片观察点数量限制 |
-| `stm32_rtt` | RTT 通道：固件侧把控制块放在 RAM，主机侧经 openocd 读取，输出带级别与时间戳 |
-| `stm32_serial` | 串口交互（Windows）：`list` / `open` / `read` / `send` / `transact` / `status` / `close` |
-
-### 固件中的 RTT 接入（最短示例）
-
-```c
-/* USER CODE BEGIN 0 */
-static char rtt_buf[3][1024];
-static void rtt_init(void) {
-  /* 控制块按 SEGGER 约定放在 RAM：acId / acName / 三个环，见 templates/ 中的 rtt.h */
-}
-/* USER CODE END 0 */
+```
+1. stm32_ecad_init        在工程里建 hardware/circuit 工作区
+2. 写 hardware/circuit/index.circuit.tsx（tscircuit 源，唯一写者）
+3. stm32_ecad_build      构建出 hardware/circuit/dist/<名>/kicad/*.kicad_pcb + .kicad_sch
+4. stm32_ecad_design     一键：预检 → 构建 → 合并焊盘 → 导库 → ERC → DRC → 可制造性 → STEP → Gerber
 ```
 
-完整实现见 `templates/` 内的 RTT 模板；通道数与环大小由 `RTT_UP_CHANNELS` / `RTT_BUF_SIZE` 控制（默认 3×1 KB = 3 KB `.bss`，C8T6 只有 20 KB RAM）。
+`dsh-ecad` 不猜器件：`index.circuit.tsx` 里的 `jlcpcb:C<编号>` 决定 BOM 料号，封装名决定 PCB 封装；缺封装时 `stm32_part_import` 从 KiCad 官方库复制，库里没有才回退立创页面转换，两条都失败会同时给出两个原因。
 
-### PDF 读取（数据手册与原理图）
+## 工具参考（42 个）
 
-依赖 poppler（`pdftotext` / `pdfinfo` / `pdftoppm`）：`pacman -S --needed mingw-w64-ucrt-x86_64-poppler` 装进 MSYS2，`stm32_doctor` 会显示版本。
+### 工程与构建
 
-| 用途 | 调法 | 得到什么 |
-| --- | --- | --- |
-| 判断这份 PDF 能不能读文字 | `mode=info` | 页数、纸张、有无文字层；描边字体的 PDF 会明确提示只能看图 |
-| 查参数、读表格 | `mode=text` + `first`/`last` | 保版面的文字，表格按列对齐 |
-| 找「第几页有什么图」 | `mode=figures` | 图注清单与页号 |
-| 读某个参数表的行与列 | `mode=table` | 列名、行数据、置信度；切不全是 medium，配同页原文核对 |
-| 看曲线、框图 | `mode=render` + `page`/`dpi`/`crop` | PNG 路径，交给视觉读图；抠数字用 300–400 dpi 并收紧裁切 |
-
-读图得到的是形态与量级（约 ±0.5 个最小刻度），不是精确数值；精确参数优先查同页表格。
-
-### 数据手册缓存
-
-非 STM32 器件（LDO、运放、传感器、接口芯片）第一次用到时，把厂商手册抓下来存本地：
-
-- `ecad_ds_fetch code=C25137` 按立创编号抓；`all=true` 抓本工程 `circuit` 源码里出现的全部 `jlcpcb:` 器件；`file=` 手工导入 PDF（反爬或没有编号时的退路）。
-- 缓存位置 `~/.dsh-stm32/datasheets/<编号>/`（`meta.json` + 以内容 sha256 命名的 PDF），可用 `DSH_STM32_DATASHEETS` 改目录。命中缓存时**不联网**；抓取失败记 24 小时负缓存，`refresh=true` 可强制重试。
-- `stm32_ecad_build` 成功后会自动补齐本工程用到的手册；面板「电路设计」头部显示「手册 2/3」，缺的标黄，点「补手册」走同一套逻辑。
-- 16P USB-C 这类封装把同一块铜拆成两个脚（A1/B12），自动布线器选不出唯一焊盘会整板放弃；预检命中时构建会跳过布线并忽略摆放间距告警，布线在 KiCad 里手工完成。
-- `ecad_ds_lookup code=C25137 kind=electrical` 直接翻到电气特性那一页：先读前 40 页建一次索引（只记页号），之后按页取正文。
-- `ecad_ds_list` 看已缓存哪几份、占多少空间。
-- 手册的引脚表可兜底 `ecad_sch_to_ioc`：`ecad_sch_to_ioc datasheet=C25137`，器件库没有这个脚的信号时，用手册「Pin name / Alternate functions」两列补候选，结果标 `（手册）`。
-- 缓存清理：`ecad_ds_list remove=C25137` 或 `olderThanDays=180`，返回删了哪些、释放多少字节；面板「手册 x/y（N.N MB）」只读，删除走工具。
-- 曲线图不用靠眼睛估：`ecad_pdf_read file=DS14721.pdf mode=curve page=44` 按色相分出每条曲线，用纵/横刻度做线性标定，返回 (x, y) 序列；图例文字认不出，序列按色相命名。
-- 抓到之后直接 `ecad_pdf_read file=C25137`（或写型号）就能读，不必再给路径——引脚、电气参数、时序都从这里取，不靠记忆编。
-
-## 斜杠命令
-
-| 命令 | 说明 |
+| 工具 | 说明 |
 | --- | --- |
-| `/stm32-doctor` | 体检：工具链、残留进程、端口、`.elf` 与 `.ioc` 告警 |
-| `/stm32-env` | 工具链体检：编译 / 烧录 / 调试 / 生成四项能力缺什么、装在哪、如何安装 |
-| `/stm32-setup` | 体检 → 安装计划 → 确认后安装 → 自检 |
-| `/stm32-build [目录] [--clean]` | 编译（CMake + Ninja，默认 `build/Debug`），`--clean` 先全清 |
-| `/stm32-flash [目录]` | 只烧录：program + verify + reset，结束后释放探针 |
-| `/stm32-debug [目录]` | 烧录并进入调试，停在 `main`，之后可用 `stm32_debug_eval` |
-| `/stm32-stop` | 关闭调试会话、释放探针，之后可在 VS Code 中按 F5 |
+| `stm32_ecad_init` | 在 `hardware/` 下建 `circuit/`、`kicad/`、`libs/`、`out/`，写 `package.json`；不装依赖 |
+| `stm32_ecad_build` | 用 KiCad 自带 bun 跑 `tsci build --kicad-project --svgs`，产出 `circuit.json`、SVG、KiCad 工程 |
+| `stm32_ecad_check` | 对生成的 KiCad 工程跑 ERC 与 DRC，收敛成清单（含 `notes` 与 DFM） |
+| `stm32_ecad_libs` | 把板与图里内嵌的封装/符号抽成 `hardware/libs` 下的真库并登记库表 |
+| `stm32_ecad_design` | 九步流水线：预检 → 构建 → 合并焊盘 → 导库 → ERC → DRC → 可制造性 → STEP → 制造文件（可选布线） |
+| `stm32_ecad_step` / `stm32_ecad_export` / `stm32_ecad_package` | 导 STEP；导 Gerber/钻孔/坐标；打包交付 zip（含自检） |
+| `ecad_layout_fix` | 检查并把 `.dsh-stm32/workspace.conf`、`dsh-stm32.conf` 归位 |
 
-## 调试台（面板）
+### 原理图
 
-会话页签内的「调试台」用于人机同看同一条时间线：`stm32_*` 调用的开始、成功、失败与耗时，以及串口、RTT、监视、引脚、时钟、中断与 `.ioc` 变更。
+| 工具 | 说明 |
+| --- | --- |
+| `ecad_sch_read` | 读图：图纸树、元件与引脚网络、网表、模块框图 |
+| `ecad_sch_pins` | 主控每个引脚的网络 + CubeMX 复用候选 |
+| `ecad_sch_check` | 规则检查（调试口/电源/BOOT0/缺值/网络冲突），可选与 PCB、`.ioc` 对账 |
+| `ecad_sch_review` | 一键评审：读图 → 规则检查 → 与 `.ioc` 对账 → 配置草案 |
+| `ecad_sch_to_ioc` | 把连接转成 `.ioc` 配置草案（建议 + 置信度，软件模拟单独列） |
+| `stm32_sch_draw` | 手绘层：`seed` 拷底图；`wire`/`label`/`clone`/`move`/`remove`/`place`；写盘后用 `kicad-cli` 导网表校验 |
+| `stm32_sch_edit` | 指令式编辑：`connect`/`label` 存 `schematic-edits.json`，构建收尾重放 |
+| `stm32_sch_import` | 把 KiCad 里的改动按网表差异吸收回 `index.circuit.tsx`（坐标不保留） |
+| `stm32_sch_sync` | 手绘层新放的器件补到板上：封装从库来、已在板上的跳过、自动网名不赋 |
 
-| 页签 | 内容 | 操作 |
-| --- | --- | --- |
-| 概览 | 工程、型号、SYSCLK、容量、调试会话、工具链、构建与烧录、证据占用、告警摘要 | 跳转失败筛选与实时通道，导出操作记录 Markdown |
-| 事件 | 调用起止、耗时、慢调用标记、参数摘要 | 只看失败、按工具筛选、按耗时排序、批量引用、导出 JSONL、事件深链 |
-| 实时通道 | 串口 / RTT / 监视输出 | 暂停、清空、关键字过滤、RTT 级别过滤、发送串口行、常驻采集、导出 |
-| 引脚 | 按外设分组、按端口排布、按封装画法（芯片型号 + 封装名 + 四边引脚小长条，1 脚圆点） | 筛选、复制引用、查看 `.ioc` 键、导出 CSV |
-| 流程图 | 按功能模块聚合的网状框图（主控居中，NFC 天线与标签、光检测、供电、调试口、按键环绕摆放；原理图没写型号时按封装脚数与位号推断主控，并在页脚说明），连线从框的四个方向进出，按总线与信号用途标注，附检查结论 | 只读；元件不单独成框，电源网络单独列出；页签上的「一键评审」会跑读图 + 规则检查 + `.ioc` 草案并列出需要人决策的脚 |
-| 电路设计 | tscircuit 工作区状态：初始化、依赖、入口、最近构建、库、导出产物 | 可在页签里直接触发构建、检查、导出库、导出 STEP、打包 Gerber、打包交付、补数据手册；构建与打包要几十秒 |
-| 时钟 | 树与流向两种视图、各节点频率与分频 | 超限标记与「改为 ÷N」建议（按父时钟计算） |
-| 中断 | NVIC 使能、抢占与子优先级 | 筛选、排序、就地修改、批量修改 |
-| 故障 | 失败事件原文、规则解码、按规则合并 | 分类筛选、复制组提示、导出 CSV |
-| 产物 | elf / hex / bin、大小、校验和、容量、两次构建对比 | 复制校验和 |
-| 变更 | `.ioc` 与基线的差异 | 记基线、恢复单键、一次恢复全部 |
+### PCB 与制造
 
-工程目录按约定解析，位置可显式指定：程序目录取 `program/`、`firmware/`、`app/`、`user/`、`fw/`、`code/` 或工程根；这些候选都不命中时按深度 2 内扫描 `*.ioc`，命中的父目录就是程序目录（目录名由使用者决定）；KiCad 工程取 `hardware/`、`kicad/`、`hw/`、`pcb/`（都没有时扫描 `*.kicad_pro`）；配置与基线在工程根的 `.dsh-stm32/`。两处位置可写进工程根的 `dsh-stm32.conf`（`firmware=` / `hardware=`），写了 `ioc=` 时以该文件所在的目录为准。工作区索引固定写在 `<工作区>/.dsh-stm32/workspace.conf`，工程描述固定写在工程根，放错时用 `ecad_layout_fix` 一键归位（先备份）。
+| 工具 | 说明 |
+| --- | --- |
+| `stm32_pcb_place` | 按网表放置：主控居中、接口沿边、小件贴大件、courtyard 间隙 0.6 mm |
+| `stm32_pcb_autoroute` | KiCadRoutingTools 布线（`dryRun` 默认 true，`apply` 前留 `.bak`） |
+| `stm32_pcb_route` | 自研最近邻布线，仅作对照（已被取代） |
+| `stm32_pcb_ipc` | KiCad 官方 IPC：移动/布线/过孔/重铺/保存；未开 KiCad 时自动 `pcbnew` 打开并等就绪 |
+| `stm32_pcb_render` | 板图 SVG（顶层/底层，焊盘/走线/过孔/丝印/板框/位号可关） |
+| `stm32_pcb_gerber` | 把导出的 Gerber 与钻孔读回来画成一张图 |
+| `stm32_pcb_3d` | 3D 预览（PNG）与 GLB/STEP 导出；缺模型点名到「位号：路径」 |
+| `stm32_pcb_swap` | 换封装（KiCad 官方库）：位号/值/位置/旋转保留，网络按焊盘号搬，提示重布 |
+| `stm32_mech` | 板框尺寸、定位孔、孔到边距离，可导 DXF |
+| `stm32_stackup` | 按层数取嘉立创常规叠层，反算 50/90/100 Ω 的线宽与间距 |
+| `stm32_impedance` | 把阻抗目标写成 `.kicad_dru` 的线宽/间距规则（DRC 无 impedance 约束） |
 
-打开面板会先补齐本会话最近的记录，之后实时追加。事件每 30 秒写入 `~/.dsh-stm32/evidence/<日期>/<会话>/`，可回放、导出；默认保留 7 天、最近 20 个会话，可在配置里调整。面板只展示本插件自己的工具调用，不含其他工具的调用。面板只显示本会话的工程与调试会话：换到另一个工作区的会话时，没有工程就是空面板，不会借用别的会话的工程与调试输出。
+### 校验与成本
 
-## 串口（Windows）
+| 工具 | 说明 |
+| --- | --- |
+| `stm32_netgate` | 网表↔PCB 门禁：图纸比板子新、网络拆开、缺焊盘、元件缺失、手绘层差异 |
+| `stm32_emc` | 载流线宽（IPC-2221）、铺铜、回流路径、串扰、差分间距 |
+| `stm32_pcb_links` | 布线体检：差分对长度差、平面层上的信号、去耦电容到引脚距离 |
+| `stm32_power` | 功耗与电源树电流预算（只合计填的电流，估算单列） |
+| `stm32_bom` | BOM 分组与元件成本；`prices: true` 才联网取立创报价 |
+| `stm32_brief` | 生成 `docs/01-MRD.md`、`02-hardware-PRD.md`、`03-design-brief.md` 骨架（事实自动填，需求留待定） |
+| `stm32_symbol_footprint` | 按引脚表生成 `.kicad_sym`，按尺寸生成 `.kicad_mod` |
 
-`stm32_serial` 提供七个动作：`list` / `open` / `read` / `send` / `transact` / `status` / `close`。打开端口后由插件持有，一次一个端口，默认 115200 8N1、无流控、DTR / RTS 不拉高，回合结束时自动关闭。
+### 器件与手册
 
-- 平台：仅 Windows；Linux 与 macOS 返回 `unsupported-platform`。
-- 端口：`list` 枚举可用端口；端口参数按设备记忆，换 COM 号后可复用。
-- 读：`read` 支持游标，只返回游标之后的新行。
-- 写入：`send` 发送一行，`transact` 发送并等待匹配回包（正则）。
-- 保留：`persist=true` 跨回合保留端口。
+| 工具 | 说明 |
+| --- | --- |
+| `stm32_part_import` | 按 `Lib:Name` 导入封装（KiCad 库优先，`source=lcsc` 可强制立创），生成符号骨架，3D 模型一并收进工程 |
+| `ecad_part_search` | 型号/参数/立创编号搜索：库存、起订、阶梯价（接口不给封装字段就如实说） |
+| `ecad_ds_fetch` / `ecad_ds_list` / `ecad_ds_lookup` | 立创手册下载与缓存、清单、按用途查页 |
+| `ecad_pdf_read` | PDF：文字、表格、图、页面渲染、曲线数字化、原理图 PDF 元件清单 |
 
-参考验证板为 CH340（`1A86:7523`，COM5，115200）。同一板上的 DAPLink 虚拟串口（`c251:f001`，COM4）不承载应用串口数据。
+## 硬件台面板
 
-## 设计要点
+会话页签里的「硬件台」（`conversation.view`，与固件插件的「调试台」并列）：
 
-- **只写自有文件**：`.ioc` 走事务（计划 → 校验 → 备份 → 替换），生成区只写 `USER CODE` 块，其余生成文件不由插件修改。
-- **烧录与调试分离**：`stm32_flash` 不建立调试会话，烧完即释放探针；需要调试时才开 `stm32_debug_session`，空闲自动关闭，避免与 VS Code 抢占探针。
-- **结论附证据**：失败时给出编译器 `文件:行:列`、探针错误分类、寄存器读数，而不是模糊描述。
-- **缺什么就说什么**：芯片、时钟或调试脚本不受支持时，报错直接说明缺哪一项，不猜测、不静默跳过。
-- **不接管宿主**：面板只展示状态与执行明确的工程动作，不做代码编辑与 Git 操作。
+- 页签：概览 / 事件 / 流程图 / 电路设计 / 故障 / 产物 / 变更
+- 「电路设计」：板图、BOM、电源预算、叠层、一致性、EMC、机械、3D 预览、制造文件、器件搜索
+- 工程选择按会话隔离；状态条显示插件版本、路由数与「有新构建」提示
+
+## 工程目录约定
+
+```
+<工程>/
+  dsh-stm32.conf            工程描述（name / mcu / ioc / build / firmware），两个插件共用
+  dsh/mcu.json              固件插件写的 MCU 事实（dsh-mcu/1）
+  hardware/
+    circuit/                tscircuit 源与产物（index.circuit.tsx、dist/）
+    kicad/                  生成的 KiCad 工程（每次构建重写，只读）
+    schematic/              手绘层（schematic.kicad_sch，不被构建覆盖）
+    libs/                   从 KiCad 库或立创导入的封装、符号、3D 模型
+    out/                    Gerber、STEP、GLB、PNG、DXF、BOM
+  .dsh-stm32/               工作区索引与备份（两个插件共用）
+```
 
 ## 配置
 
-### 配置文件（`~/.dsh-stm32/config.json`）
-
-工具链位置由插件维护：`stm32_env_install` 安装后写入该文件，后续工具直接读取，无需重启 DSH 或设置环境变量。也可手工编辑：
-
-```json
-{
-  "version": 1,
-  "msys64": "E:/msys64",
-  "binDirs": [],
-  "packages": ["mingw-w64-ucrt-x86_64-arm-none-eabi-gcc", "mingw-w64-ucrt-x86_64-cmake"],
-  "cubeMxRoot": "",
-  "updatedAt": "2026-02-01T00:00:00.000Z"
-}
-```
-
-`binDirs` 为空时由 `msys64` 推导 `<msys64>/ucrt64/bin`。文件损坏（JSON 非法）视为不存在，不影响其他功能。
-
-优先级：工具参数（`binDirs` / `cubeMxRoots`）> 环境变量 > 配置文件 > 内置默认值。内置默认值只含 Windows 常见位置，不含任何机器专属路径。
-
-### 设置面板
-
-DSH 设置内的「STM32 工具链」页提供三张卡片：
-
-- **装在哪**：读取并保存 `msys64` / `cubeMxRoot` / 额外 `binDirs`，保存后下一条工具调用即生效。
-- **缺什么**：执行一次探测（只读版本查询），逐项显示路径、版本、缺失原因，以及编译 / 烧录 / 调试 / 生成四项能力徽章。
-- **装工具链**：先出计划（步骤、下载体积、PATH 与配置变更），确认后执行；过程显示步骤与日志尾部。
-
-### 下载缓存与固件包
-
-- 寄存器版 CMSIS 模板首次使用时下载到缓存（默认 `%LOCALAPPDATA%\dsh-stm32\cache`），之后复用；逐文件校验，变更即拒收。`stm32_cache` 可查看、校验、拉取与清理。
-- HAL 路线使用本机 CubeMX 固件包：F1 默认 `STM32Cube_FW_F1_V1.8.7`，其他族取已安装的最高版本；可用 `firmwarePackage` 指定。缺失时先在 CubeMX 包管理器中安装，或用 `stm32_firmware_install` 下载组装。
-- 可自动组装的族：F1 / F2 / F3 / F4 / F7 / G0 / L1 / L4 / L5 / H5 / H7 / U0 / U3 / U5 / WB / WL / WBA / C0。F4 默认 `STM32Cube_FW_F4_V1.28.0`；不在清单里的族只给手动安装步骤。
-- `stm32_download` 只下载或校验安装包（默认目录 `%LOCALAPPDATA%\dsh-stm32\downloads`），不执行安装器，不请求管理员权限。
-
-### 环境变量（可选）
-
-| 变量 | 作用 | 默认 |
+| 环境变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `STM32_BIN_DIRS` | 工具链目录候选，`;` 分隔，整份替换内置列表（自动发现仍追加在尾部） | `C:/msys64/ucrt64/bin`、`C:/msys64/mingw64/bin` |
-| `STM32_CUBEMX_ROOT` | CubeMX 安装根，整份替换内置列表 | `C:/Program Files/STMicroelectronics/STM32Cube/STM32CubeMX` |
-| `STM32_NO_DISCOVER` | 设为 `1` 关闭自动发现（仅用内置列表） | 不设 |
-| `DSH_STM32_CONFIG` | 替换配置文件路径 | `%USERPROFILE%\.dsh-stm32\config.json` |
-| `DSH_STM32_NO_CONFIG` | 设为 `1` 完全不读配置文件 | 不设 |
-| `DSH_STM32_CACHE` | 下载缓存根目录，支持 `~` | `%LOCALAPPDATA%\dsh-stm32\cache` |
-| `DSH_STM32_DOWNLOADS` | 安装包下载目录，支持 `~` | `%LOCALAPPDATA%\dsh-stm32\downloads` |
-| `DSH_STM32_HOME` | 插件数据根目录（配置、证据、快照、备忘） | `%USERPROFILE%\.dsh-stm32` |
-| `DSH_STM32_EVIDENCE` | 证据目录 | `~/.dsh-stm32/evidence` |
-| `DSH_STM32_EVIDENCE_FLUSH_SECONDS` | 证据落盘间隔（5–3600 秒） | 30 |
-| `DSH_STM32_EVIDENCE_KEEP_DAYS` | 证据保留天数（0–365，0 = 不清理） | 7 |
-| `DSH_STM32_EVIDENCE_KEEP_SESSIONS` | 证据保留会话数（1–200） | 20 |
-| `DSH_STM32_SNAPSHOTS` | `.ioc` 基线目录 | `~/.dsh-stm32/ioc-snapshots` |
-| `DSH_STM32_OFFLINE` | 设为 `1` 禁止联网下载（模板与固件包仅用本地缓存） | 不设 |
-| `MSYS2_MIRROR` | 安装包镜像，必须与 `MSYS2_INSTALLER_SHA256` 同时设置 | 官方 → TUNA → NJU → 阿里云 |
-| `MSYS2_INSTALLER_URL` / `MSYS2_INSTALLER_SHA256` | 覆盖安装包地址与校验和，必须成对设置 | 官方固定版本 |
-| `DSH_STM32_JLINK_URL` / `DSH_STM32_JLINK_SHA256` | 覆盖 J-Link 直链与校验和，必须成对设置 | SEGGER 官方 |
-
-工具参数与上述变量等价：烧录与调试类接受 `binDirs`、`elfPath`、`buildDir`、`configFile`、`adapterSpeed`；生成与建工程类接受 `cubeMxRoots`、`firmwarePackage`。
-
-工具链位置通常无需配置：未指定 `binDirs` / `STM32_BIN_DIRS` 时，插件会在常见位置查找并追加候选——`<盘>/msys64`、`<盘>/msys2`、`<盘>/app/msys64`、`<盘>/tools/msys64`、`%LOCALAPPDATA%/Programs/msys64` 下的 `ucrt64/bin`、`mingw64/bin`、`clang64/bin`，以及 `STM32CubeMX_PATH` 环境变量、CubeMX 卸载登记项、`Program Files\STMicroelectronics\STM32Cube` 等位置下的 CubeMX。找不到时，错误与 `stm32_doctor` 会列出已检查的目录。
-
-### openocd.cfg（工程内优先）
-
-CMSIS-DAP（默认）：
-
-```text
-source [find interface/cmsis-dap.cfg]
-source [find target/stm32f1x.cfg]
-adapter speed 4000
-```
-
-ST-Link：
-
-```text
-source [find interface/stlink.cfg]
-transport select hla_swd
-source [find target/stm32f1x.cfg]
-```
-
-工程内没有 `openocd.cfg` 时按 `.ioc` 的芯片族选择调试脚本（F1 → `stm32f1x`、F4 → `stm32f4x`、G4 → `stm32g4x`；L4 与 L4+ 共用 `stm32l4x`）。C0 / U0 的脚本随插件提供并在建工程时复制到工程的 `openocd/` 目录；H5 / N6 / U3 / WBA / WB0 / WL3 / MP2 暂无脚本，烧录会被明确拒绝。
-
-### `.ioc` 的两个硬要求
-
-1. **SYS 调试口为 Serial Wire**（PA13 = `SYS_JTMS-SWDIO`、PA14 = `SYS_JTCK-SWCLK`）；缺失时用 `stm32_ioc_plan` 的 `serialWire: true` 补齐。
-2. **`ProjectManager.KeepUserCode=true`**；否则重新生成时 `USER CODE` 内容不保留。
+| `DSH_ECAD_HOME` | `~/.dsh-ecad` | 用户级目录：运行时、手册与价格缓存、封装缓存、证据 |
+| `DSH_STM32_ECAD_RUNTIME` | `<DSH_ECAD_HOME>/ecad-runtime` | 共享运行时（tscircuit）位置，全机一份 |
+| `DSH_STM32_ECAD_AUTO_INSTALL` | `ask` | `auto` 首次构建时自动装运行时；`off` 不装 |
+| `DSH_STM32_OFFLINE` | — | `1` 时禁止联网（搜索、查价、手册、立创封装） |
+| `DSH_STM32_FOOTPRINTS` | — | 覆盖封装缓存目录 |
+| `KICAD_PYTHON` / `DSH_KICAD_PYTHON` | KiCad 自带 python | `pcbnew` 与 IPC 脚本解释器 |
 
 ## 已知限制
 
-| 限制 | 说明 | 处理方式 |
-| --- | --- | --- |
-| 仅在 Windows 验证 | 生成代码依赖 CubeMX 的 Windows 安装形态 | 暂无可替代方案；烧录、调试、读寄存器在其他平台理论可用，未验证 |
-| 部分芯片暂无官方调试脚本 | C0 / U0 用插件自带的适配脚本（未上板验证）；H5 / N6 / U3 / WBA / WB0 / WL3 / MP2 暂无脚本 | 烧录前会明确说明，不会静默失败 |
-| HAL 建工程不覆盖双核与 MPU 系列 | 双核 WB、MP1 / MP2 / N6、WB0 / WL3 不在范围内 | 建工程时直接说明不支持 |
-| 深层能力按族分级 | HAL 21 族、寄存器 21 族、时钟 18 族；寄存器名与位域目前只有 F1 | 缺哪项就在调用时说明哪项 |
-| 探针按 USB 实见选择 | ST-Link、DAPLink / CMSIS-DAP、J-Link 自动区分；工程内 `openocd.cfg` 优先 | 需要固定选择时手写 `openocd.cfg` |
-| 新增外设需手工补 HAL 源 | 插件只放置 `Src/` 与 `Inc/`，CubeMX 生成的 `cmake/**` 不搬运 | 修改 `STM32_Drivers_Src` 或写入 `cmake/user/CMakeLists.txt` |
-| 生成与建工程需要 CubeMX 与对应固件包 | F1 默认 `STM32Cube_FW_F1_V1.8.7` | 传 `firmwarePackage`，或先在 CubeMX 内安装固件包 |
-| RTT 仅通道 0，帧头为自定义格式 | 13 字节头（长度 + 级别 + 时间戳 + UTF-8 正文） | 用级别过滤；结构化内容写入正文；通道与环大小见 `rtt.h` |
-| 串口仅 Windows | 不含推流、自动重连，一次一个端口 | 使用系统串口工具，或等待后续版本 |
-| 寄存器名与位域依赖内置寄存器表 | 目前覆盖 F1 的 100 / 101 / 102 / 103 / 105 / 107 | 使用 `0x` 开头的地址；`stm32_assets verify` 检查安装完整性 |
+- **自动布线是辅助**：KiCadRoutingTools 能布通、DRC 干净，但线形不如人工；插件只做「布通 + 体检」，不假装能替代手工走线。
+- **细间距档**：布线器按嘉立创工艺下限走线（1–2 层 0.127 mm，≥4 层 0.10 mm，另有 0.003 mm 量化余量），要做到 0.2 mm 统一档需人工加宽。
+- **KiCad 10 的 IPC 没有原理图读接口**：只能写（`CreateItems` 等），所以「读图」用本插件自己的解析器；`Update PCB from Schematic` 需要 KiCad 管理器打开工程（`RunAction` 未纳入自动流程）。
+- **3D 覆盖率**：tscircuit 产出的模型不保证每个封装都有；缺的会点名，不画假模型。
+- **手绘层不进构建目录**：`hardware/schematic/` 是人的图纸，构建不覆盖，也不会自动回流到 `circuit.tsx`（要显式 `stm32_sch_import`）。
+- **单活动工程**：面板一次看一个工程（按会话记忆）。
+- 在 Windows 上验证最充分；Linux/macOS 的工具链探测已按路径分开，但未做同等实测。
 
-## 排错
+## 校验
 
-| 现象 | 原因 | 处理 |
-| --- | --- | --- |
-| 插件未加载 | profile 的 `dsh.profile.bundles` 未包含 `dsh-stm32`，或未重启 | 重装并重启 DSH；用 `dsh plugin --profile desktop why dsh-stm32` 校验 |
-| 修改代码后行为未变 | 用 `file:` 安装，宿主读取的是拷贝 | 改用 `link:`，重新 `npm run build` 并重启 DSH |
-| 报缺工具链 | 未安装或路径未收录 | 先跑 `/stm32-env` 看缺什么，再 `/stm32-setup` 安装；或手工设置 `binDirs` |
-| 烧录报探针占用 | 其他调试器（VS Code、残留 openocd）持有探针 | `/stm32-stop`，关闭其他调试器后重试；`stm32_doctor` 会列出残留进程 |
-| 烧录后 SWD 失联 | `.ioc` 未启用 Serial Wire | 用 `stm32_ioc_plan` 的 `serialWire: true` 补齐后重新生成并烧录 |
-| 生成后外设被丢弃 | `.ioc` 键与外设推导不一致 | 用 `stm32_ioc_verify` 让 CubeMX 诊断 |
-| 面板空白或数据不更新 | 服务端改动未重启，或 `lib` 比进程新 | 完全退出 DSH 再启动；面板状态条会提示「有新构建」 |
-| 串口无数据 | 端口选择错误（如选到 DAPLink 虚拟串口） | `stm32_serial list` 确认端口；应用串口通常在 CH340 等 USB 转串口设备上 |
-
-## 开发与测试
-
-| 命令 | 作用 |
-| --- | --- |
-| `npm run build` | `tsc` 编译到 `lib/`，并复制客户端与数据资源 |
-| `node test/run-units.mjs` | 离线单测：81 个套件 / 1101 个用例，不需要板子 |
-| `node .dsh-stm32/acceptance.mjs` | 本机验收脚本：面板 API、事件流、证据、产物、故障、中断、串口与探针 |
-| `npm run test:pack` | 打包 tarball、解包、用解包产物实际建一次寄存器工程 |
-| `npm run test:size` | 包体与资产护栏 |
-
-发布形态：随包发布的内容限定在 `package.json` 的 `files`（`lib`、`client`、`templates`、`assets`、`docs/reading-guide.md`、`cordis.patch.yml`、两份 README、`LICENSE`）。开发用的 `docs/`、`test/`、`scripts/` 不进包。
-
-开发调试用的环境变量（日常使用无需设置）：`DSH_STM32_ASSETS`、`DSH_STM32_FACTS` 覆盖资源目录，`DSH_STM32_SERIAL_BRIDGE`、`DSH_STM32_SERIAL_POWERSHELL` 覆盖串口桥路径，`DSH_STM32_PYTHON` 指定解析用的 Python 解释器。
-
-## 目录结构
-
-```text
-src/
-  index.ts          插件入口：注册工具、斜杠命令、面板 API 与 SKILL
-  tools/            68 个工具的注册与参数校验
-  engine/           引擎：工程、.ioc、生成、构建、烧录、调试、事件与面板 API
-  data/             芯片数据、CubeMX 数据、时钟、搜索根、工具链配置
-  commands/         7 条斜杠命令
-  skill/            随包下发的 stm32-workflow SKILL
-client/client.js    面板源码（纯 JS + react，无打包器）
-lib/                tsc 产物与复制后的资源（随包发布）
-assets/             芯片数据、.ioc 模板、链接脚本、启动文件、寄存器表
-templates/          建工程模板、寄存器模板、串口桥与 RTT 模板
-test/               80 个离线套件与 e2e 脚本
-scripts/            构建、打包、体积与冒烟脚本
-docs/               开发笔记、精读指南、规格书、图表
+```bash
+npm run typecheck
+npm run build
+node test/run-units.mjs     # 21 套件 / 336 pass
+npm run test:pack
+npm run test:size           # 需 export npm_config_cache=/tmp/npmcache
 ```
-
-## 文档
-
-- [规格书](docs/dsh-stm32-plugin-规格.md)：工具契约、状态机、验收判定标准
-- [开发笔记](docs/development-notes.md)：里程碑、宿主契约问题、各工具实现细节与实测数据
-- [源码精读指南](docs/reading-guide.md)：分层阅读顺序、文件职责与关键导出、流程图与不变量
-- 发布说明：按版本随发布页提供，历史见 git 历史与开发笔记
-- 可视化：[架构总览](docs/diagrams/dsh-stm32-architecture.html) / [主线旅程](docs/diagrams/dsh-stm32-journey.html)（单文件 HTML，离线可开）
 
 ## 致谢
 
-电路设计与 PCB 能力的部分设计参考了以下两个开源项目（只借鉴设计思路与流程，代码按各自许可使用）：
+- [KiCad](https://www.kicad.org/)：工程格式、`kicad-cli`、`pcbnew`、IPC。
+- [KiCadRoutingTools](https://github.com/alphapixels/KiCadRoutingTools)（MIT）：网格布线器。
+- [tscircuit](https://github.com/tscircuit/tscircuit)（MIT）：`circuit.tsx` 到 KiCad 工程。
+- [uPesy/easyeda2kicad.py](https://github.com/uPesy/easyeda2kicad.py) 的 `CMD_FOOTPRINT.md`：立创封装字段与层号的事实来源（文档参考，未复制代码）。
 
-- [oh-my-embedded](https://github.com/captainluzik/oh-my-embedded)（MIT）：把专家经验固化成可调用的小工具（功耗预算、去耦建议、引脚映射、阻抗计算），本插件的去耦与放置建议参照了这一思路。
-- [PCB-Agent-Teams](https://github.com/Zane456/PCB-Agent-Teams)（PolyForm Noncommercial 1.0.0）：分阶段流水线与"门禁不通过就回滚、每个结论双路校验、资产未落盘不许画板"的工程纪律；本插件借鉴其流程设计，未复制其代码。
+## 文档
 
-同时致谢其依赖的上游项目，本插件以依赖或思路借鉴方式使用：
-
-- [KiCad](https://www.kicad.org/)：原理图与 PCB 的读写、`kicad-cli` 与 `pcbnew` Python API。
-- [kicad-happy](https://github.com/aklofas/kicad-happy)（MIT）：EMC、热与生命周期分析的规则来源。
-- [KiCadRoutingTools](https://github.com/drandyhaas/KiCadRoutingTools)（MIT）：网格自动布线的实现参考。
-- [ngspice](https://ngspice.sourceforge.io/)：SPICE 复核。
-- [poppler](https://poppler.freedesktop.org/)：PDF 文字、表格与渲染。
-- [tscircuit](https://tscircuit.com/)：电路源码到 KiCad 工程的生成。
-
-## 许可证
-
-[MIT](LICENSE)
+- [使用与维护指南](docs/reading-guide.md)
+- [开发笔记](docs/development-notes.md)（硬件侧条目 S90 起；S1–S89 属于拆分前的固件侧）

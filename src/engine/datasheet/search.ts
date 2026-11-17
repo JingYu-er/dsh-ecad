@@ -10,6 +10,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ecadHome } from "../ecad-home.js";
 
 export const LCSC_SEARCH_URL = "https://wmsc.lcsc.com/ftps/wm/search/third";
 
@@ -43,8 +44,7 @@ export interface PartSearchResult {
 }
 
 export function searchCachePath(env: NodeJS.ProcessEnv): string {
-  const home = env.DSH_STM32_HOME;
-  return home !== undefined && home !== "" ? join(home, "part-search.json") : join(process.env.USERPROFILE ?? process.env.HOME ?? ".", ".dsh-stm32", "part-search.json");
+  return join(ecadHome(env), "part-search.json");
 }
 
 interface CacheEntry {

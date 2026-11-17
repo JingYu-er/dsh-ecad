@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadRmTopics } from "../data/rm-topics.js";
+import { ecadHome } from "./ecad-home.js";
 
 /** facts 包里的语义条目（由 RM 抽取，带页码）。 */
 export interface FactsSemantic {
@@ -51,7 +52,7 @@ export interface FactsSummary {
 /** facts 缓存根（可用 DSH_STM32_FACTS 覆盖）。 */
 export function factsRoot(env: NodeJS.ProcessEnv = process.env): string {
   const custom = env.DSH_STM32_FACTS;
-  return custom !== undefined && custom !== "" ? custom : join(homedir(), ".dsh-stm32", "facts");
+  return custom !== undefined && custom !== "" ? custom : join(ecadHome(), "facts");
 }
 
 /** STM32C031F6P6 → { family: "c0", line: "STM32C031" }。 */

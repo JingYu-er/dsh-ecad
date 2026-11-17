@@ -3,7 +3,7 @@
  * 包体护栏：npm 包必须保持轻量。
  *
  * 规则（docs/development-notes.md 的「随包 / 进仓库 / 现造」三分法）：
- *   - tarball ≤ 4 MB —— assets/ 源文件约 12.5 MB，但主要是文本（设备头压缩率高），实测 1.76 MB。
+ *   - tarball ≤ 4 MB —— assets/ 只留设备事实（约 2.6 MB），其余运行时资产不再随包分发。
      芯片事实、.ioc 模板、链接脚本、启动文件、CMSIS 设备头随包发布（2026-11 起不再拆独立资源仓，
      也就没有联网下载失败这条路）。超出上限说明混进了固件包、架构图或 RM 这类不该随包的东西。
  *   - templates/** 里的**运行时资产** ≤ 40 KB —— 这里只算工具真的会读进内存用的文件
@@ -34,7 +34,7 @@ const FORBIDDEN = /\.(png|jpe?g|gif|webp|bmp|pdf|html?|zip|7z|exe|dll)$/i;
 /** 这些文档必须在包里（docs/*.md 是白名单，别把整个 docs 排除掉）。 */
 const REQUIRED = [
   "README.md", "README_EN.md", "LICENSE", "cordis.patch.yml", "docs/reading-guide.md",
-  "assets/manifest.json", "assets/device/f1/chips.json", "assets/ioc/minimal/STM32F103C8Tx.ioc",
+  "assets/manifest.json", "assets/device/f1/chips.json",
 ];
 
 const here = dirname(fileURLToPath(import.meta.url));

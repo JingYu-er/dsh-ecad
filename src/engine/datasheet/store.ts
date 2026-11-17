@@ -22,6 +22,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { fetchLcscProduct, type LcscOptions, type LcscProduct } from "./lcsc.js";
+import { ecadHome } from "../ecad-home.js";
 
 /** 缓存条目：一份手册的全部事实。 */
 export interface DatasheetEntry {
@@ -54,7 +55,7 @@ let lastRequestAt = 0;
 export function datasheetCacheDir(env: Record<string, string | undefined> = process.env): string {
   const explicit = (env["DSH_STM32_DATASHEETS"] ?? "").trim();
   if (explicit !== "") return explicit;
-  return join(env["USERPROFILE"]?.trim() || homedir(), ".dsh-stm32", "datasheets");
+  return join(ecadHome(env), "datasheets");
 }
 
 export function isLcscCode(value: string): boolean {

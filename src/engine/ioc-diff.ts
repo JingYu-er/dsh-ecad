@@ -12,6 +12,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileS
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { findIocPath } from "./pinout.js";
+import { ecadHome } from "./ecad-home.js";
 
 /** 键值条目：`Mcu.CPN=STM32F103C8T6` 这种行。 */
 export interface IocEntry {
@@ -53,7 +54,7 @@ export interface IocSnapshotReport {
 export function snapshotRoot(env: NodeJS.ProcessEnv = process.env): string {
   const custom = env.DSH_STM32_SNAPSHOTS;
   if (typeof custom === "string" && custom.trim() !== "") return resolve(custom.trim());
-  return join(homedir(), ".dsh-stm32", "ioc-snapshots");
+  return join(ecadHome(), "ioc-snapshots");
 }
 
 /** 一个工程一份基线，文件名取工程绝对路径的短哈希，换机器不冲突。 */

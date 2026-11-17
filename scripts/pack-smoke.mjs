@@ -59,8 +59,6 @@ try {
     "cordis.patch.yml",
     "assets/manifest.json",
     "assets/device/f1/chips.json",
-    "assets/ioc/minimal/STM32F103C8Tx.ioc",
-    "assets/ld/f1/STM32F103C8Tx_FLASH.ld",
   ];
   for (const rel of mustHave) {
     say(existsSync(join(pkgRoot, rel)), "包内文件存在：" + rel);

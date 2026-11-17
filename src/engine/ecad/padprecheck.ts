@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { ecadHome } from "../ecad-home.js";
 
 /**
  * 封装焊盘预检（S130）。
@@ -80,7 +81,7 @@ export function coincidentGroups(pads: readonly ModPad[], tolerance = 0.01): str
 export function footprintCacheDir(env: NodeJS.ProcessEnv = process.env): string {
   const override = (env["DSH_STM32_FOOTPRINTS"] ?? "").trim();
   if (override !== "") return override;
-  const home = (env["DSH_STM32_HOME"] ?? "").trim() || join(homedir(), ".dsh-stm32");
+  const home = ecadHome(env);
   return join(home, "kicad-mod-cache");
 }
 
