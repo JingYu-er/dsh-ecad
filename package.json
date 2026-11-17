@@ -1,0 +1,70 @@
+{
+  "name": "dsh-ecad",
+  "version": "0.1.0",
+  "description": "DSH 插件：硬件设计工具层 —— tscircuit 原理图与库、KiCad PCB 放置/布线/DRC/DFM、BOM 与成本、叠层阻抗、EMC、机械、Gerber 与 3D",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "client",
+    "templates",
+    "assets",
+    "docs/reading-guide.md",
+    "cordis.patch.yml",
+    "README.md",
+    "README_EN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-client.mjs && node scripts/copy-data.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node test/run-units.mjs",
+    "prepublishOnly": "npm run build",
+    "test:pack": "node scripts/pack-smoke.mjs",
+    "test:size": "node scripts/pack-size.mjs"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "dsh",
+    "stm32",
+    "stm32f103c8t6",
+    "cortex-m3",
+    "arm",
+    "embedded",
+    "firmware",
+    "stm32cubemx",
+    "openocd",
+    "cmsis-dap",
+    "gdb"
+  ],
+  "license": "MIT",
+  "author": "dsh-stm32 contributors",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JingYu-er/dsh-stm32.git"
+  },
+  "homepage": "https://github.com/JingYu-er/dsh-stm32#readme",
+  "bugs": {
+    "url": "https://github.com/JingYu-er/dsh-stm32/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^5.9.2"
+  }
+}

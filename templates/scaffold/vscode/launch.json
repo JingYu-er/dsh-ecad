@@ -1,0 +1,53 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // ========== ① 只烧录：烧完直接运行，不调试 ==========
+            // 用法：运行和调试面板下拉选中本配置 -> 按 Ctrl+F5
+            // 原理：不写 runToEntryPoint，cortex-debug 烧完复位后会自己 continue，
+            //       芯片直接跑；Ctrl+F5 又不会把你的断点下发到芯片。
+            "name": "① 只烧录（烧完自动运行）",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/__PROJECT_NAME__.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+            // configFiles 只给工程自带的 openocd.cfg：里面按顺序写了 interface → transport → target
+            // （J-Link 必须显式 transport select swd；ST-Link/CMSIS-DAP 的 interface 自带 transport）。
+            // 拆成 interface + target 两条时 cortex-debug 没处插 transport，J-Link 会默认走 jtag 而连不上。
+            "configFiles": [
+                "${workspaceFolder}/openocd.cfg"
+            ],
+            // 想看外设寄存器（可选）：自己加一行 "svdPath": "<对应芯片的 .svd 绝对路径>"。
+            // 不给也能调试，只是没有外设寄存器视图；插件不替你选 SVD。
+            "armToolchainPath": "__ARM_TOOLCHAIN_PATH__",
+            "gdbPath": "__GDB_PATH__",
+            "toolchainPrefix": "arm-none-eabi",
+            "showDevDebugOutput": "none",
+            "breakAfterReset": false
+        },
+        {
+            // ========== ② 烧录并调试：烧完停在 main，可以下断点单步 ==========
+            // 用法：选中本配置 -> 按 F5
+            "name": "② 烧录并调试（停在 main）",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/__PROJECT_NAME__.elf",
+            "request": "launch",
+            "type": "cortex-debug",
+            "servertype": "openocd",
+            // configFiles 只给工程自带的 openocd.cfg：里面按顺序写了 interface → transport → target
+            // （J-Link 必须显式 transport select swd；ST-Link/CMSIS-DAP 的 interface 自带 transport）。
+            // 拆成 interface + target 两条时 cortex-debug 没处插 transport，J-Link 会默认走 jtag 而连不上。
+            "configFiles": [
+                "${workspaceFolder}/openocd.cfg"
+            ],
+            // 想看外设寄存器（可选）：自己加一行 "svdPath": "<对应芯片的 .svd 绝对路径>"。
+            // 不给也能调试，只是没有外设寄存器视图；插件不替你选 SVD。
+            "armToolchainPath": "__ARM_TOOLCHAIN_PATH__",
+            "gdbPath": "__GDB_PATH__",
+            "toolchainPrefix": "arm-none-eabi",
+            "showDevDebugOutput": "none",
+            "runToEntryPoint": "main"
+        }
+    ]
+}

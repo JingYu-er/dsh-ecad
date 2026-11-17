@@ -1,0 +1,1077 @@
+// 为什么要有这个套件：缓存 + 下载 + 寄存器版模板是三条"会碰外网、会写磁盘、会生成工程"的路径。
+// 它们坏了的表现很难看：半截缓存被当模板用、404 页面被当头文件、生成的工程编译不过。
+// 所以这里全部用**注入的 fetchImpl**（一次网络都不发）+ 临时目录，逐条钉住行为。
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
+
+import {
+  cacheRootInfo,
+  checkCacheEntry,
+  findCacheEntry,
+  readCacheIndex,
+  removeCacheEntry,
+  sha256OfFile,
+  upsertCacheEntry,
+  writeCacheIndex,
+} from "../lib/engine/cache.js";
+import { registerCache } from "../lib/tools/cache.js";
+import { fetchAll, fetchOne } from "../lib/engine/fetch.js";
+import { cmsisTemplatePlan, sourceUrls, startupChoiceFor } from "../lib/data/cmsis-sources.js";
+import { createRegisterProject, ensureCmsisTemplate, resolveStartupChoice } from "../lib/engine/register-template.js";
+import { renderLedFunctions } from "../lib/engine/register-gpio.js";
+
+import { FIXTURE_ASSETS } from "./fixtures.mjs";
+
+// 设备事实只从资源包缓存读（内置 chip-table.json 已删）：单测统一指到夹具，绝不读真实 home 缓存。
+process.env.DSH_STM32_ASSETS = FIXTURE_ASSETS;
+
+function tempDir(tag) {
+  return mkdtempSync(join(tmpdir(), "dsh-stm32-" + tag + "-"));
+}
+
+/** 每个文件的最小字节数不同（见 cmsis-sources 的 minBytes），这里按文件名给足量内容。 */
+function payloadFor(name) {
+  const sizes = {
+    "stm32f1xx.h": 400,
+    "stm32f103xb.h": 12_000,
+    "system_stm32f1xx.h": 400,
+    "system_stm32f1xx.c": 1_200,
+    "startup_stm32f103xb.s": 1_200,
+    "core_cm3.h": 600,
+    "cmsis_compiler.h": 600,
+    "cmsis_gcc.h": 600,
+    "cmsis_version.h": 600,
+    "mpu_armv7.h": 600,
+  };
+  // F1 全系 14 个启动文件 / 14 个设备头不逐个列：设备头 minBytes 10_000、启动文件 1_000，
+  // 体量给不到就会被 fetch 当"太短"拒掉，测试会误报成"下载失败"。
+  let size = sizes[name];
+  if (size === undefined) {
+    if (/^startup_stm32f\d{3}x[0-9a-z]{1,2}\.s$/u.test(name)) size = 1_500;
+    else if (/^stm32f\d{3}x[0-9a-z]{1,2}\.h$/u.test(name)) size = 12_000;
+    else size = 800;
+  }
+  const line = "/* " + name + " */ ";
+  let text = "";
+  while (text.length < size) text += line;
+  // 内容特征（A32）：每个文件都要带上"真实文件里一定有"的那行，否则 fetch 会判内容不对。
+  return text + "\n" + markerFor(name);
+}
+
+/**
+ * 与 cmsis-sources.ts 里各 target 的 markers 对齐——用的是上游文件里的**真实守卫**。
+ * 之前的版本按文件名猜（"#ifndef __MPU_ARMV7_H"），恰好撞上旧 markers 的 __MPU_，
+ * 于是 mpu_armv7.h 的真实守卫 ARM_MPU_ARMV7_H 反而测不到。
+ */
+function markerFor(name) {
+  if (name === "system_stm32f1xx.c") return "void SystemInit(void);";
+  if (name.endsWith(".s")) return ".syntax unified\n_estack:";
+  if (name === "core_cm3.h") return "#ifndef __CORE_CM3_H";
+  if (name === "cmsis_compiler.h") return "#ifndef __CMSIS_COMPILER_H";
+  if (name === "cmsis_gcc.h") return "#ifndef __CMSIS_GCC_H";
+  if (name === "cmsis_version.h") return "#define __CMSIS_VERSION";
+  if (name === "mpu_armv7.h") return "#ifndef ARM_MPU_ARMV7_H"; // ARM 原版守卫，没有前导下划线
+  if (name === "cachel1_armv7.h") return "#ifndef ARM_CACHEL1_ARMV7_H"; // core_cm7.h 条件 include 的缓存头
+  if (name === "stm32f1xx.h") return "#ifndef __STM32F1XX_H";
+  if (name === "stm32f103xb.h") return "#ifndef __STM32F103xB_H";
+  if (name === "system_stm32f1xx.h") return "#ifndef __SYSTEM_STM32F1XX_H";
+  return "#ifndef __" + name.replace(/[^a-z0-9]/gi, "_").toUpperCase() + "_H";
+}
+
+/**
+ * 假 fetch：按 URL 末尾的文件名返回内容；never = 永远 404；html = 返回一个网页。
+ * 记录每次调用的 URL，用来断言"按候选顺序回退"。
+ */
+/** sha256（测试构造哈希用）。 */
+function hashOf(text) {
+  return createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
+}
+
+/** 与 cmsisTemplatePlan 的 target.path 一一对应的示例内容（供哈希注入）。 */
+const SAMPLE_PAYLOADS = {
+  "Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f1xx.h": payloadFor("stm32f1xx.h"),
+  "Drivers/CMSIS/Device/ST/STM32F1xx/Include/system_stm32f1xx.h": payloadFor("system_stm32f1xx.h"),
+  "Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f103xb.h": payloadFor("stm32f103xb.h"),
+  "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c": payloadFor("system_stm32f1xx.c"),
+  "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s": payloadFor("startup_stm32f103xb.s"),
+  "Drivers/CMSIS/Include/core_cm3.h": payloadFor("core_cm3.h"),
+  "Drivers/CMSIS/Include/cmsis_compiler.h": payloadFor("cmsis_compiler.h"),
+  "Drivers/CMSIS/Include/cmsis_gcc.h": payloadFor("cmsis_gcc.h"),
+  "Drivers/CMSIS/Include/cmsis_version.h": payloadFor("cmsis_version.h"),
+  "Drivers/CMSIS/Include/mpu_armv7.h": payloadFor("mpu_armv7.h"),
+};
+
+/** path → sha256（注入 ensureCmsisTemplate 的测试点，验证哈希校验链路本身）。 */
+function contentHashes(override = {}) {
+  const out = {};
+  for (const [key, text] of Object.entries(SAMPLE_PAYLOADS)) out[key] = hashOf(text);
+  return { ...out, ...override };
+}
+
+function fakeFetch(options = {}) {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(url);
+    if (typeof options.handler === "function") return options.handler(url, calls);
+    const name = url.split("/").pop();
+    const body = payloadFor(name);
+    return new Response(body, { status: 200 });
+  };
+  impl.calls = calls;
+  return impl;
+}
+
+test("缓存根目录：DSH_STM32_CACHE 优先，支持 ~ 展开，其次 LOCALAPPDATA", () => {
+  const home = "C:\\Users\\tester";
+  const withOverride = cacheRootInfo({ DSH_STM32_CACHE: "D:/tmp/my-cache", USERPROFILE: home });
+  assert.equal(withOverride.origin, "DSH_STM32_CACHE");
+  assert.equal(withOverride.root, "D:\\tmp\\my-cache".replace(/\\/g, "\\"));
+  assert.equal(withOverride.indexPath.endsWith("index.json"), true);
+
+  const withHome = cacheRootInfo({ DSH_STM32_CACHE: "~/cache-here", USERPROFILE: home });
+  assert.equal(withHome.root.startsWith(home), true);
+
+  const localApp = cacheRootInfo({ LOCALAPPDATA: "C:\\Users\\tester\\AppData\\Local", USERPROFILE: home });
+  assert.equal(localApp.origin, "LOCALAPPDATA");
+  assert.equal(localApp.root.endsWith(join("dsh-stm32", "cache")), true);
+});
+
+test("缓存索引：文件不存在当空索引，坏 JSON 不抛异常而是给一条中文错误", () => {
+  const root = tempDir("cache-index");
+  const env = { DSH_STM32_CACHE: root };
+  try {
+    const missing = readCacheIndex(env);
+    assert.equal(missing.error, null);
+    assert.equal(missing.index.entries.length, 0);
+
+    writeFileSync(join(root, "index.json"), "{ this is not json", "utf8");
+    const broken = readCacheIndex(env);
+    assert.equal(broken.index.entries.length, 0);
+    assert.equal(typeof broken.error, "string");
+    assert.match(broken.error, /索引读不了/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("缓存条目：upsert 覆盖同 id，checkCacheEntry 能报出缺文件与大小不符", () => {
+  const root = tempDir("cache-entry");
+  const env = { DSH_STM32_CACHE: root };
+  const entryDir = join(root, "F1", "demo");
+  try {
+    mkdirSync(entryDir, { recursive: true });
+    writeFileSync(join(entryDir, "a.h"), "12345", "utf8");
+    const entry = {
+      id: "cmsis:F1:demo",
+      kind: "cmsis",
+      family: "F1",
+      label: "demo",
+      root: entryDir,
+      createdAt: new Date().toISOString(),
+      totalBytes: 5,
+      files: [{ path: "a.h", bytes: 5, url: "https://example.invalid/a.h" }],
+      sources: [],
+      license: "",
+    };
+    upsertCacheEntry(entry, env);
+    const index = readCacheIndex(env).index;
+    assert.equal(findCacheEntry(index, "cmsis", "cmsis:F1:demo").id, "cmsis:F1:demo");
+    assert.equal(checkCacheEntry(entry).ok, true);
+
+    writeFileSync(join(entryDir, "a.h"), "123456789", "utf8");
+    const changed = checkCacheEntry(entry);
+    assert.equal(changed.ok, false);
+    assert.equal(changed.changed.length, 1);
+
+    rmSync(join(entryDir, "a.h"));
+    const gone = checkCacheEntry(entry);
+    assert.equal(gone.ok, false);
+    assert.equal(gone.missing.length, 1);
+
+    // 同 id 再写一次不该出现两条
+    upsertCacheEntry(entry, env);
+    assert.equal(readCacheIndex(env).index.entries.length, 1);
+
+    assert.equal(removeCacheEntry("cmsis:F1:demo", env).removed, true);
+    assert.equal(readCacheIndex(env).index.entries.length, 0);
+    assert.equal(existsSync(entryDir), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("缓存索引：坏 JSON 时 upsert 先备份成 index.json.broken-*，新索引只含新条目", () => {
+  const root = tempDir("cache-broken");
+  const env = { DSH_STM32_CACHE: root };
+  const brokenText = "{ this is not json";
+  try {
+    writeFileSync(join(root, "index.json"), brokenText, "utf8");
+    upsertCacheEntry(
+      {
+        id: "cmsis:F1:broken",
+        kind: "cmsis",
+        family: "F1",
+        label: "broken",
+        root: join(root, "F1", "broken"),
+        createdAt: new Date().toISOString(),
+        totalBytes: 0,
+        files: [],
+        sources: [],
+        license: "",
+      },
+      env,
+    );
+
+    const backups = readdirSync(root).filter((name) => name.startsWith("index.json.broken-"));
+    assert.equal(backups.length, 1, "坏索引要留一份能人工救回来的备份");
+    assert.equal(readFileSync(join(root, backups[0]), "utf8"), brokenText, "备份必须是原来那串坏 JSON");
+
+    const after = readCacheIndex(env);
+    assert.equal(after.error, null);
+    assert.deepEqual(after.index.entries.map((item) => item.id), ["cmsis:F1:broken"], "重建后只含新条目，不是把坏的当空索引又留着备份");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("缓存索引：换索引失败时旧索引逐字节不变、抛可识别的错、不留临时文件", () => {
+  const root = tempDir("cache-write-fail");
+  const env = { DSH_STM32_CACHE: root };
+  const kept = {
+    id: "cmsis:F1:keep",
+    kind: "cmsis",
+    family: "F1",
+    label: "keep",
+    root: join(root, "F1", "keep"),
+    createdAt: new Date().toISOString(),
+    totalBytes: 0,
+    files: [],
+    sources: [],
+    license: "",
+  };
+  const fresh = { ...kept, id: "cmsis:F1:new" };
+  const isWriteError = (error) => error?.name === "CacheIndexWriteError" && /索引写不进去/u.test(error.message);
+  try {
+    writeCacheIndex({ version: 1, updatedAt: "", entries: [kept] }, env);
+    const before = readFileSync(join(root, "index.json"), "utf8");
+
+    // 一、rename 全失败（Windows 上目标被占用就是这种表现）：旧索引逐字节不动，临时文件不残留。
+    const denyRename = () => {
+      const error = new Error("模拟目标被占用（EPERM）");
+      error.code = "EPERM";
+      throw error;
+    };
+    assert.throws(() => writeCacheIndex({ version: 1, updatedAt: "", entries: [fresh] }, env, { rename: denyRename }), isWriteError);
+    assert.equal(readFileSync(join(root, "index.json"), "utf8"), before, "旧索引必须逐字节没动");
+    assert.deepEqual(readdirSync(root), ["index.json"], "失败不许留下 .tmp-* / .bak-*");
+    assert.deepEqual(readCacheIndex(env).index.entries.map((item) => item.id), ["cmsis:F1:keep"]);
+
+    // 二、第一次 rename 失败、备份成功后搬新索引又失败：必须把旧索引原样放回。
+    let calls = 0;
+    const renameThenFail = (from, to) => {
+      calls += 1;
+      if (calls === 1 || calls === 3) throw new Error("模拟第 " + String(calls) + " 次 rename 失败");
+      renameSync(from, to);
+    };
+    assert.throws(() => writeCacheIndex({ version: 1, updatedAt: "", entries: [fresh] }, env, { rename: renameThenFail }), isWriteError);
+    assert.equal(readFileSync(join(root, "index.json"), "utf8"), before, "备份之后再失败要把旧索引放回去");
+    assert.deepEqual(readdirSync(root), ["index.json"], "放回后不该留下备份或临时文件");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fetchOne：第一个源 404 就换第二个；拿回网页或太短都不算成功", async () => {
+  const root = tempDir("fetch-one");
+  try {
+    const impl = fakeFetch({
+      handler: (url) => {
+        if (url.includes("fastly")) return new Response("nope", { status: 404 });
+        return new Response(payloadFor("stm32f1xx.h"), { status: 200 });
+      },
+    });
+    const target = { path: "Include/stm32f1xx.h", urls: sourceUrls("cmsis-device-f1", "master", "Include/stm32f1xx.h"), minBytes: 200 };
+    const outcome = await fetchOne(target, root, { fetchImpl: impl });
+    assert.equal(outcome.ok, true);
+    assert.equal(outcome.attempts.length, 1);
+    assert.match(outcome.url, /jsdelivr|raw\.githubusercontent|ghproxy/u);
+    assert.equal(readFileSync(join(root, "Include", "stm32f1xx.h"), "utf8").startsWith("/*"), true);
+
+    const htmlBody = "<!doctype html><html><body>" + "x".repeat(400) + "</body></html>";
+    const htmlImpl = fakeFetch({ handler: () => new Response(htmlBody, { status: 200 }) });
+    const htmlOutcome = await fetchOne(target, root, { fetchImpl: htmlImpl });
+    assert.equal(htmlOutcome.ok, false);
+    assert.match(htmlOutcome.error, /网页/u);
+
+    const tinyImpl = fakeFetch({ handler: () => new Response("<html>", { status: 200 }) });
+    const tinyOutcome = await fetchOne({ ...target, minBytes: 10_000 }, root, { fetchImpl: tinyImpl });
+    assert.equal(tinyOutcome.ok, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** 造一个"给一半就停"的响应：abort 时让 stream 报错，模拟低速被 watchdog 掐断。 */
+function stallingResponse(chunk, signal) {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(chunk));
+        signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+      },
+    }),
+    { status: 200 },
+  );
+}
+
+test("F3c 低速中断：同一个源带 Range 从断点续传，拼出来的文件是完整的", async () => {
+  const root = tempDir("fetch-resume");
+  try {
+    const payload = "#ifndef __CORE_CM3_H\n#define __CORE_CM3_H\n" + "y".repeat(4000);
+    const bytes = Buffer.from(payload, "utf8");
+    const head = bytes.subarray(0, 1500);
+    const tail = bytes.subarray(1500);
+    const calls = [];
+    const impl = async (url, init) => {
+      const range = init?.headers?.Range ?? "";
+      calls.push(range === "" ? "fresh" : range);
+      if (range === "") return stallingResponse(head, init?.signal);
+      return new Response(new Uint8Array(tail), {
+        status: 206,
+        headers: { "Content-Range": "bytes 1500-" + String(bytes.length - 1) + "/" + String(bytes.length) },
+      });
+    };
+    const outcome = await fetchOne(
+      { path: "core_cm3.h", urls: ["https://x/core_cm3.h"], minBytes: 100, markers: ["__CORE_CM3_H"] },
+      root,
+      { fetchImpl: impl, stallMs: 150, minBytesPerSec: 1024 },
+    );
+    assert.equal(outcome.ok, true, outcome.error);
+    assert.deepEqual(calls, ["fresh", "bytes=1500-"], "第二次必须带 Range 从断点接着要");
+    assert.equal(readFileSync(join(root, "core_cm3.h"), "utf8"), payload, "断点接起来的文件不能有重复或缺口");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F3c 服务器无视 Range 回 200：整份重写，不是接在旧字节后面", async () => {
+  const root = tempDir("fetch-range-ignored");
+  try {
+    const payload = "#ifndef __CORE_CM3_H\n#define __CORE_CM3_H\n" + "z".repeat(4000);
+    const bytes = Buffer.from(payload, "utf8");
+    const calls = [];
+    const impl = async (url, init) => {
+      const range = init?.headers?.Range ?? "";
+      calls.push(range === "" ? "fresh" : range);
+      if (range === "") return stallingResponse(bytes.subarray(0, 1500), init?.signal);
+      return new Response(new Uint8Array(bytes), { status: 200 });
+    };
+    const outcome = await fetchOne(
+      { path: "core_cm3.h", urls: ["https://x/core_cm3.h"], minBytes: 100, markers: ["__CORE_CM3_H"] },
+      root,
+      { fetchImpl: impl, stallMs: 150, minBytesPerSec: 1024 },
+    );
+    assert.equal(outcome.ok, true, outcome.error);
+    assert.equal(calls.length, 2, calls.join(" / "));
+    const text = readFileSync(join(root, "core_cm3.h"), "utf8");
+    assert.equal(text, payload, "200 是整份重发，必须截断写，绝不能变成 1500+4000 字节");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("F3c 太慢之后换源：新源从零开始，旧源的半截 .part 不会被拼进来", async () => {
+  const root = tempDir("fetch-switch");
+  try {
+    const good = "#ifndef __CORE_CM3_H\n#define __CORE_CM3_H\n" + "w".repeat(4000);
+    const goodBytes = Buffer.from(good, "utf8");
+    const calls = [];
+    const impl = async (url, init) => {
+      calls.push(url + " " + (init?.headers?.Range ?? "fresh"));
+      if (url.includes("slow")) {
+        // 两次都只给 800 字节就停：续传一次也还是慢 → 换源。
+        const body = stallingResponse(Buffer.alloc(800, 0x41), init?.signal);
+        return body;
+      }
+      return new Response(new Uint8Array(goodBytes), { status: 200 });
+    };
+    const outcome = await fetchOne(
+      { path: "core_cm3.h", urls: ["https://slow/core_cm3.h", "https://fast/core_cm3.h"], minBytes: 100, markers: ["__CORE_CM3_H"] },
+      root,
+      { fetchImpl: impl, stallMs: 150, minBytesPerSec: 1024 },
+    );
+    assert.equal(outcome.ok, true, outcome.error);
+    assert.equal(outcome.url, "https://fast/core_cm3.h");
+    assert.equal(readFileSync(join(root, "core_cm3.h"), "utf8"), good, "换源必须重下整份，不能接前一个源的头");
+    // slow 源试了两次（首次 + 续传），fast 源一次不带 Range。
+    assert.equal(calls.filter((line) => line.startsWith("https://slow/")).length, 2, calls.join("\n"));
+    assert.equal(calls.filter((line) => line.startsWith("https://fast/")).length, 1, calls.join("\n"));
+    assert.ok(calls.at(-1).startsWith("https://fast/") && calls.at(-1).endsWith("fresh"), calls.at(-1));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("fetchAll：并发下每个文件各算一次，失败数能统计出来", async () => {
+  const root = tempDir("fetch-all");
+  try {
+    const targets = [
+      { path: "a.h", urls: ["https://x/a.h"], minBytes: 10 },
+      { path: "b.h", urls: ["https://x/b.h"], minBytes: 10 },
+      { path: "c.h", urls: ["https://x/c.h"], minBytes: 10 },
+    ];
+    const impl = fakeFetch({
+      handler: (url) => (url.endsWith("b.h") ? new Response("no", { status: 500 }) : new Response(payloadFor("a.h"), { status: 200 })),
+    });
+    const result = await fetchAll(targets, root, { fetchImpl: impl, concurrency: 2 });
+    assert.equal(result.ok, 2);
+    assert.equal(result.failed, 1);
+    assert.equal(result.bytes > 0, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("启动文件映射：F1 六条 line × 容量档，落到 ST 真实的 14 个启动文件（不再写死 C8T6）", () => {
+  const c8 = startupChoiceFor("STM32F103C8T6");
+  // choice 现在带回 chip：链接脚本尺寸和时钟都靠它，先把它剥掉再比老四件套，旧签名保持兼容。
+  assert.deepEqual(
+    { family: c8.family, startup: c8.startup, define: c8.define, deviceHeader: c8.deviceHeader },
+    { family: "F1", startup: "startup_stm32f103xb.s", define: "STM32F103xB", deviceHeader: "stm32f103xb.h" },
+  );
+  assert.equal(c8.chip.cpn, "STM32F103C8T6");
+  assert.equal(c8.chip.flashBytes, 65_536);
+  assert.equal(c8.chip.ramBytes, 20_480);
+
+  const table = [
+    ["STM32F100VBT6", "startup_stm32f100xb.s", "STM32F100xB"],
+    ["STM32F100RET6", "startup_stm32f100xe.s", "STM32F100xE"],
+    ["STM32F101C6T6", "startup_stm32f101x6.s", "STM32F101x6"],
+    ["STM32F101VBT6", "startup_stm32f101xb.s", "STM32F101xB"],
+    ["STM32F101VET6", "startup_stm32f101xe.s", "STM32F101xE"],
+    ["STM32F101ZGT6", "startup_stm32f101xg.s", "STM32F101xG"],
+    ["STM32F102C6T6", "startup_stm32f102x6.s", "STM32F102x6"],
+    ["STM32F102CBT6", "startup_stm32f102xb.s", "STM32F102xB"],
+    ["STM32F103C6T6", "startup_stm32f103x6.s", "STM32F103x6"],
+    ["STM32F103RBT6", "startup_stm32f103xb.s", "STM32F103xB"],
+    ["STM32F103VET6", "startup_stm32f103xe.s", "STM32F103xE"],
+    ["STM32F103ZGT6", "startup_stm32f103xg.s", "STM32F103xG"],
+    ["STM32F105RCT6", "startup_stm32f105xc.s", "STM32F105xC"],
+    ["STM32F107VCT6", "startup_stm32f107xc.s", "STM32F107xC"],
+  ];
+  for (const [mcu, startup, define] of table) {
+    const choice = startupChoiceFor(mcu);
+    assert.equal(choice === null, false, mcu + " 应当认得出来");
+    assert.equal(choice.startup, startup, mcu + " 的启动文件");
+    assert.equal(choice.define, define, mcu + " 的设备宏");
+    assert.equal(choice.deviceHeader, choice.chip.deviceHeader, mcu + " 的 deviceHeader 与 chip 一致");
+    assert.equal(choice.family, "F1");
+  }
+
+  // 旧写法（容量档 / 松散 line:group）保持兼容：F1:8 / F1:B / F1:C / F103:xb
+  assert.equal(startupChoiceFor("F1:8").startup, "startup_stm32f103xb.s");
+  assert.equal(startupChoiceFor("F1:B").startup, "startup_stm32f103xb.s");
+  assert.equal(startupChoiceFor("F1:C").startup, "startup_stm32f103xe.s");
+  assert.equal(startupChoiceFor("F103:xb").startup, "startup_stm32f103xb.s");
+  // 夹具资源只有 F1/F4 的芯片表（test/fixtures/assets），所以表里没有的型号必须返回 null，
+  // 而不是编一个启动文件名。H5 现在有 CMSIS 清单了，但夹具里没有 H5 的 chips.json——
+  // 这条断言钉的是"查不到型号事实"，不是"这一族不支持"；8 族清单本身由下面合成 choice 的用例直接钉 spec 表。
+  assert.equal(startupChoiceFor("STM32H563ZIT6"), null);
+  assert.equal(startupChoiceFor("不认识"), null);
+  assert.equal(resolveStartupChoice({}).startup, "startup_stm32f103xb.s");
+});
+
+test("模板清单：10 个文件、路径按 ST 固件包布局、id 可检索", () => {
+  const choice = startupChoiceFor("STM32F103C8T6");
+  const plan = cmsisTemplatePlan(choice);
+  assert.equal(plan.targets.length, 10);
+  const paths = plan.targets.map((item) => item.path);
+  assert.equal(paths.includes("Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f103xb.h"), true);
+  assert.equal(paths.includes("Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s"), true);
+  assert.equal(paths.includes("Drivers/CMSIS/Include/core_cm3.h"), true);
+  // id / dirName 从"启动文件 stem"改成 <family>:<line+group>：光 xb 这一档在 F100/F101/F102/F103 都有，
+  // 只用 xb 会撞 id（107 的 xc 同理），所以带上 line 号才唯一。
+  assert.equal(plan.id, "cmsis:F1:103xb");
+  assert.equal(plan.dirName, "F1/103xb");
+  assert.match(plan.license, /Apache/u);
+  assert.equal(plan.targets.every((item) => item.urls.length === 4), true);
+
+  // 三颗不同 line 的芯片：清单结构相同，只有启动文件 / 设备头 / id 跟着变
+  for (const [mcu, id, dirName, header, startup, define] of [
+    ["STM32F101VET6", "cmsis:F1:101xe", "F1/101xe", "stm32f101xe.h", "startup_stm32f101xe.s", "STM32F101xE"],
+    ["STM32F107VCT6", "cmsis:F1:107xc", "F1/107xc", "stm32f107xc.h", "startup_stm32f107xc.s", "STM32F107xC"],
+    ["STM32F100VBT6", "cmsis:F1:100xb", "F1/100xb", "stm32f100xb.h", "startup_stm32f100xb.s", "STM32F100xB"],
+  ]) {
+    const other = cmsisTemplatePlan(startupChoiceFor(mcu));
+    assert.equal(other.id, id, mcu + " 的缓存 id");
+    assert.equal(other.dirName, dirName, mcu + " 的缓存目录");
+    assert.equal(other.targets.length, 10, mcu + " 也是 10 个文件");
+    const files = other.targets.map((item) => item.path.split("/").pop());
+    assert.equal(files.includes(header), true, mcu + " 要下载自己的设备头");
+    assert.equal(files.includes(startup), true, mcu + " 要下载自己的启动文件");
+    assert.equal(files.includes("stm32f103xb.h"), false, "不许串到别的 line 的头文件");
+    assert.equal(other.choice.define, define);
+  }
+});
+
+test("寄存器模板：补的 8 族（H5/H7/L4+/L5/U3/U5/WBA/WL）清单与按族 GPIO 写法", () => {
+  // 夹具资源只有 F1/F4 的芯片表，这 8 族走不了 startupChoiceFor（见上面那条用例）；
+  // 这里直接给合成 choice，把 spec 表钉住：族 → 设备头仓库 / 内核头 / MPU 头 / 设备头目录（前缀），
+  // 以及 RCC 时钟门写法。路径错了的后果是"下载成功但 include 找不到"，所以断言完整路径而不是只数个数。
+  const cases = [
+    // family, 前缀, 内核头, MPU 头, 启动文件, 型号头, 设备宏, line, group, 时钟门, 设备仓库, 代表型号
+    ["H5", "STM32H5", "core_cm33.h", "mpu_armv8.h", "startup_stm32h503xx.s", "stm32h503xx.h", "STM32H503xx", "503", "xx", "RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;", "cmsis-device-h5", "STM32H503CBT6"],
+    ["H7", "STM32H7", "core_cm7.h", "mpu_armv7.h", "startup_stm32h723xx.s", "stm32h723xx.h", "STM32H723xx", "723", "xx", "RCC->AHB4ENR |= RCC_AHB4ENR_GPIOCEN;", "cmsis-device-h7", "STM32H723VGT6"],
+    ["L4+", "STM32L4", "core_cm4.h", "mpu_armv7.h", "startup_stm32l4p5xx.s", "stm32l4p5xx.h", "STM32L4P5xx", "4P5", "xx", "RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;", "cmsis-device-l4", "STM32L4P5AGI6"],
+    ["L5", "STM32L5", "core_cm33.h", "mpu_armv8.h", "startup_stm32l552xx.s", "stm32l552xx.h", "STM32L552xx", "552", "xx", "RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;", "cmsis-device-l5", "STM32L552CET6"],
+    ["U3", "STM32U3", "core_cm33.h", "mpu_armv8.h", "startup_stm32u375xx.s", "stm32u375xx.h", "STM32U375xx", "375", "xx", "RCC->AHB2ENR1 |= RCC_AHB2ENR1_GPIOCEN;", "cmsis-device-u3", "STM32U375CET6"],
+    ["U5", "STM32U5", "core_cm33.h", "mpu_armv8.h", "startup_stm32u535xx.s", "stm32u535xx.h", "STM32U535xx", "535", "xx", "RCC->AHB2ENR1 |= RCC_AHB2ENR1_GPIOCEN;", "cmsis-device-u5", "STM32U535CBT6"],
+    ["WBA", "STM32WBA", "core_cm33.h", "mpu_armv8.h", "startup_stm32wba50xx.s", "stm32wba50xx.h", "STM32WBA50xx", "50", "xx", "RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;", "cmsis-device-wba", "STM32WBA50KGU6"],
+    ["WL", "STM32WL", "core_cm4.h", "mpu_armv7.h", "startup_stm32wle4xx.s", "stm32wle4xx.h", "STM32WLE4xx", "E4", "xx", "RCC->AHB2ENR |= RCC_AHB2ENR_GPIOCEN;", "cmsis-device-wl", "STM32WLE4CBU6"],
+  ];
+  for (const [family, prefix, core, mpu, startup, header, define, line, group, clock, deviceRepo, cpn] of cases) {
+    // 合成的事实只用到 line/group（缓存 id 与目录名）和 startup/header/define；
+    // 其余字段照 DeviceFactsChip 填，保持与真实 chips.json 同形状。
+    const facts = {
+      cpn,
+      line,
+      group,
+      packageName: "LQFP48",
+      pinCount: 48,
+      flashBytes: 262144,
+      ramBytes: 65536,
+      deviceId: define.replace(/xx$/u, "x"),
+      mcuName: define,
+      startup,
+      deviceHeader: header,
+      deviceDefine: define,
+    };
+    const plan = cmsisTemplatePlan({ family, startup, define, deviceHeader: header, facts });
+    const label = family + "（" + cpn + "）";
+    assert.ok(plan, label + " 要有 CMSIS 下载清单");
+    // H7 多一个 cachel1_armv7.h（core_cm7.h 在 __DCACHE_PRESENT 时 include 它）；
+    // 其余族是 10 个（2 个族头 + 型号头 + system.c + 启动文件 + 5 个内核头）。
+    assert.equal(plan.targets.length, family === "H7" ? 11 : 10, label + " 的下载清单文件数");
+    if (family === "H7") {
+      assert.equal(plan.targets.some((item) => item.path === "Drivers/CMSIS/Include/cachel1_armv7.h"), true, label + " 必须带 cachel1_armv7.h");
+    }
+    const groupKey = line + group;
+    assert.equal(plan.id, "cmsis:" + family + ":" + groupKey, label + " 的缓存 id");
+    assert.equal(plan.dirName, family + "/" + groupKey, label + " 的缓存目录");
+    const lower = prefix.toLowerCase();
+    const base = "Drivers/CMSIS/Device/ST/" + prefix + "xx";
+    const paths = plan.targets.map((item) => item.path);
+    assert.equal(paths.includes(base + "/Include/" + header), true, label + " 的型号头路径");
+    // L4+ 与 L4 共用 stm32l4xx.h（前缀 STM32L4）：这一条就是"L4+ 仍落在 STM32L4xx"的回归锁。
+    assert.equal(paths.includes(base + "/Include/" + lower + "xx.h"), true, label + " 的 umbrella 头路径");
+    assert.equal(paths.includes(base + "/Include/system_" + lower + "xx.h"), true, label + " 的 system 头路径");
+    assert.equal(paths.includes(base + "/Source/Templates/system_" + lower + "xx.c"), true, label + " 的 system.c 路径");
+    assert.equal(paths.includes(base + "/Source/Templates/gcc/" + startup), true, label + " 的启动文件路径");
+    assert.equal(paths.includes("Drivers/CMSIS/Include/" + core), true, label + " 的内核头");
+    assert.equal(paths.includes("Drivers/CMSIS/Include/" + mpu), true, label + " 的 MPU 头（core_cm33 → mpu_armv8，其余 mpu_armv7）");
+    assert.equal(plan.targets.every((item) => item.urls.length === 4), true, label + " 每个文件 4 条下载路线");
+    const coreTarget = plan.targets.find((item) => item.path === "Drivers/CMSIS/Include/" + core);
+    assert.equal(coreTarget.markers.includes("__" + core.replace(/\.h$/u, "").toUpperCase() + "_H"), true, label + " 的内核头守卫标记");
+    assert.equal(plan.license.includes(deviceRepo), true, label + " 的许可证说明要写明设备头仓库");
+
+    // GPIO：这 8 族的 LED 初始化必须是真写法（不是 none 的空函数），且时钟门寄存器名按族不同。
+    const led = renderLedFunctions(family);
+    assert.deepEqual(led.warnings, [], label + " 的 GPIO 写法已实测编译过，不该有 warning");
+    assert.equal(led.text.includes(clock), true, label + " 的 RCC 时钟门");
+
+    assert.equal(led.text.includes("GPIOC->MODER"), true, label + " 用 MODER（不是 F1 的 CRL/CRH）");
+  }
+});
+
+test("ensureCmsisTemplate：缓存空且被要求不联网时，明说没下载而不是装作成功", async () => {
+  const root = tempDir("ensure-offline");
+  try {
+    const result = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env: { DSH_STM32_CACHE: root }, download: false });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "not-cached");
+    assert.match(result.message, /缓存/u);
+    assert.equal(existsSync(join(root, "index.json")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("ensureCmsisTemplate：下载成功写索引，第二次直接命中缓存（不再发请求）", async () => {
+  const root = tempDir("ensure-online");
+  const env = { DSH_STM32_CACHE: root };
+  try {
+    const first = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+    assert.equal(first.ok, true, first.message);
+    assert.equal(first.cacheHit, false);
+    assert.equal(first.files, 11, "10 个下载文件 + THIRD_PARTY_NOTICES.md（notices 也要进 files[]，A24）");
+    assert.equal(existsSync(join(first.entryDir, "Drivers/CMSIS/Include/core_cm3.h")), true);
+    assert.equal(existsSync(join(first.entryDir, "THIRD_PARTY_NOTICES.md")), true);
+    const index = readCacheIndex(env).index;
+    assert.equal(index.entries.length, 1);
+    assert.equal(index.entries[0].id, "cmsis:F1:103xb");
+    const notices = index.entries[0].files.find((file) => file.path === "THIRD_PARTY_NOTICES.md");
+    assert.ok(notices, "notices 必须在 files[] 里登记，否则 checkCacheEntry 永远不校验它");
+    assert.equal(typeof notices.sha256, "string", "每个文件都要登记 sha256（A38）");
+    assert.equal(checkCacheEntry(index.entries[0]).ok, true);
+
+    const neverFetch = async () => {
+      throw new Error("命中缓存时不该联网");
+    };
+    const second = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: neverFetch });
+    assert.equal(second.ok, true);
+    assert.equal(second.cacheHit, true);
+    assert.equal(second.entryDir, first.entryDir);
+
+    // 文件被删掉 → 自动重下
+    rmSync(join(first.entryDir, "Drivers/CMSIS/Include/core_cm3.h"));
+    const third = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+    assert.equal(third.ok, true);
+    assert.equal(third.cacheHit, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("createRegisterProject：生成的工程是齐的（CMakeLists / main.c / Drivers / 启动文件）", async () => {
+  const root = tempDir("register-proj");
+  const targetDir = join(root, "reg");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  try {
+    const report = await createRegisterProject({ targetDir, projectName: "reg", mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+    assert.equal(report.ok, true);
+    assert.equal(report.route, "register");
+    assert.equal(report.startup, "startup_stm32f103xb.s");
+    assert.equal(report.deviceDefine, "STM32F103xB");
+    // 2(CMakeLists+main.c) + 2(rtt.c/rtt.h) + 3(公共文件) + 1(.gitignore) + 1(链接脚本)
+    assert.equal(report.templateFiles, 12);
+    assert.equal(report.driverFiles, 10);
+
+    // RTT 随寄存器工程就位：CMakeLists 编它、main.c include 它，缺了会 link/编译失败
+    assert.equal(existsSync(join(targetDir, "Core", "Src", "rtt.c")), true, "寄存器工程必须有 Core/Src/rtt.c");
+    assert.equal(existsSync(join(targetDir, "Core", "Inc", "rtt.h")), true, "寄存器工程必须有 Core/Inc/rtt.h");
+    assert.match(readFileSync(join(targetDir, "Core", "Src", "rtt.c"), "utf8"), /SEGGER RTT/u);
+    assert.match(readFileSync(join(targetDir, "Core", "Inc", "rtt.h"), "utf8"), /rtt_init/u);
+
+    const cmake = readFileSync(join(targetDir, "CMakeLists.txt"), "utf8");
+    assert.match(cmake, /set\(CMAKE_PROJECT_NAME reg\)/u);
+    assert.match(cmake, /Core\/Src\/rtt\.c/u, "CMakeLists 要把 rtt.c 编进可执行文件");
+    assert.equal(cmake.includes("add_executable(${CMAKE_PROJECT_NAME}"), true);
+    assert.match(cmake, /startup_stm32f103xb\.s/u);
+    assert.match(cmake, /STM32F103xB/u);
+    assert.equal(cmake.includes("__FAMILY_DIR__"), false);
+    const main = readFileSync(join(targetDir, "Core", "Src", "main.c"), "utf8");
+    assert.match(main, /g_led_blink_count/u);
+    // main.c 现在按型号生成：芯片注释 + clock_init()（72 MHz，HSE 8 MHz ×9）
+    assert.match(main, /STM32F103C8T6/u);
+    assert.match(main, /static void clock_init\(void\)/u);
+    assert.match(main, /DSH_SYSCLK_HZ\s+72000000/u);
+    assert.match(main, /clock_init\(\);/u, "main() 必须先配时钟再用 SysTick");
+    // delay_ms 不能把调用方的 SysTick 时基掐掉：保存 CTRL/LOAD，忙等后原样恢复。
+    // 这条是 2026-11-01 真机实测发现的：用户自己起了 1 ms SysTick 中断，第一次 delay_ms 就把它关了。
+    assert.match(main, /const uint32_t ctrl_save = SysTick->CTRL;/u);
+    assert.match(main, /const uint32_t load_save = SysTick->LOAD;/u);
+    assert.match(main, /SysTick->CTRL = ctrl_save;/u);
+    assert.match(main, /SysTick->LOAD = load_save;/u);
+    assert.equal(/\n    SysTick->CTRL = 0u;\n\}/u.test(main), false, "delay_ms 结束时不能直接把 CTRL 清 0");
+    assert.equal(main.includes("__CLOCK_INIT__"), false);
+    assert.equal(main.includes("__MCU_BANNER__"), false);
+
+    // 链接脚本按型号渲染：文件名带 DeviceId，MEMORY 是这颗芯片的真实尺寸
+    assert.equal(report.deviceId, "STM32F103C8Tx");
+    assert.equal(report.linkerScript, "STM32F103C8Tx_FLASH.ld");
+    assert.equal(report.flashBytes, 65_536);
+    assert.equal(report.ramBytes, 20_480);
+    assert.equal(report.sysclkHz, 72_000_000);
+    assert.equal(existsSync(join(targetDir, "STM32F103C8Tx_FLASH.ld")), true);
+    assert.equal(existsSync(join(targetDir, "STM32F103XX_FLASH.ld")), false, "模板原名不该再出现在工程里");
+    const ld = readFileSync(join(targetDir, "STM32F103C8Tx_FLASH.ld"), "utf8");
+    assert.match(ld, /Linker script for STM32F103C8Tx series/u);
+    assert.match(ld, /LENGTH = 64K/u);
+    assert.match(ld, /LENGTH = 20K/u);
+    assert.match(cmake, /STM32F103C8Tx_FLASH\.ld/u, "CMakeLists 的 -T 要指向渲染出来的那份");
+    assert.equal(existsSync(join(targetDir, "cmake", "gcc-arm-none-eabi.cmake")), true);
+    assert.equal(existsSync(join(targetDir, "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s")), true);
+
+    const second = await createRegisterProject({ targetDir, projectName: "reg", mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes(), overwrite: true });
+    assert.equal(second.ok, true);
+    assert.equal(second.cacheHit, true);
+    assert.equal(readFileSync(join(env.DSH_STM32_CACHE, "F1", "103xb", "THIRD_PARTY_NOTICES.md"), "utf8").length > 0, true);
+
+    // 认不出的芯片（这里 WB55：双核族，内置资源还没收 device/wb/chips.json）：拒绝，而不是编一个启动文件。
+    // H5 从 0.1.5 起已经支持了（见上面 8 族清单用例），不能再用 H5 当"不支持的族"的例子。
+    const unsupported = await createRegisterProject({ targetDir: join(root, "wb"), projectName: "wb", mcu: "STM32WB55CGU6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+    assert.equal(unsupported.ok, false);
+    assert.match(unsupported.message, /暂时不支持/u);
+    // 文案里的族数必须与 CMSIS_FAMILIES 一致：0.1.5 是 21 族，别再说 13。
+    assert.match(unsupported.message, /这 21 族/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/* ---------------------- 内容校验 / sha256 / 工具行为 ---------------------- */
+
+function cacheTool() {
+  let definition;
+  registerCache({ tools: { register(def) { definition = def; } } });
+  return definition;
+}
+
+test("checkCacheEntry：同样大小、内容被换掉也要判出来（A38 sha256）", () => {
+  const root = tempDir("sha");
+  try {
+    const dir = join(root, "cmsis", "F1", "x");
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "core_cm3.h");
+    writeFileSync(file, "abcde", "utf8");
+    const entry = {
+      id: "cmsis:F1:x",
+      kind: "cmsis",
+      family: "F1",
+      label: "x",
+      root: dir,
+      createdAt: "",
+      totalBytes: 5,
+      files: [{ path: "core_cm3.h", bytes: 5, url: "", sha256: sha256OfFile(file) }],
+      sources: [],
+      license: "",
+    };
+    assert.equal(checkCacheEntry(entry).ok, true);
+    writeFileSync(file, "abXde", "utf8");
+    const health = checkCacheEntry(entry);
+    assert.equal(health.ok, false);
+    assert.match(health.changed.join("；"), /sha256/u);
+
+    // 老条目没有 sha256：退回只看字节数，不能把别人的缓存判死
+    const legacy = { ...entry, files: [{ path: "core_cm3.h", bytes: 5, url: "" }] };
+    assert.equal(checkCacheEntry(legacy).ok, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("mpu_armv7.h 用 ARM 原版守卫 ARM_MPU_ARMV7_H，不再是 __MPU_（寄存器路线必下载失败的根因）", async () => {
+  const root = tempDir("mpu");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  // 上游 V5.0.4 的真实开头：守卫没有前导下划线，旧 markers [__CMSIS,__CORE_,__MPU_] 一个都不命中。
+  // hashes 注入的是这批假内容的真实哈希（mpu 用 upstream 的、其余用 payloadFor 的）。
+  const upstream = "#ifndef ARM_MPU_ARMV7_H\n#define ARM_MPU_ARMV7_H\n" + "/* MPU */\n".repeat(80);
+  const impl = fakeFetch({
+    handler: (url) => {
+      const name = url.split("/").pop();
+      if (name === "mpu_armv7.h") return new Response(upstream, { status: 200 });
+      return new Response(payloadFor(name), { status: 200 });
+    },
+  });
+  const template = await ensureCmsisTemplate({
+    mcu: "STM32F103C8T6",
+    env,
+    fetchImpl: impl,
+    hashes: contentHashes({ "Drivers/CMSIS/Include/mpu_armv7.h": hashOf(upstream) }),
+  });
+  assert.equal(template.ok, true, template.message);
+  const mpu = join(template.entryDir, "Drivers", "CMSIS", "Include", "mpu_armv7.h");
+  assert.equal(existsSync(mpu), true, "mpu_armv7.h 应当能通过校验并落盘");
+  assert.match(readFileSync(mpu, "utf8"), /ARM_MPU_ARMV7_H/u);
+});
+
+test("fetchOne：字节数够但内容特征不对，换源而不是落盘（A32 markers）", async () => {
+  const root = tempDir("markers");
+  try {
+    const target = {
+      path: "core_cm3.h",
+      urls: ["https://a.example/core_cm3.h", "https://b.example/core_cm3.h"],
+      minBytes: 10,
+      markers: ["__CORE_CM3_H"],
+    };
+    const wrong = fakeFetch({ handler: () => new Response("<!-- 登录页 -->" + "x".repeat(400), { status: 200 }) });
+    const bad = await fetchOne(target, root, { fetchImpl: wrong });
+    assert.equal(bad.ok, false);
+    assert.match(bad.attempts.join("；"), /内容对不上/u);
+    assert.equal(existsSync(join(root, "core_cm3.h")), false, "对不上的内容不许落盘");
+
+    writeFileSync(join(root, "core_cm3.h"), "旧内容", "utf8");
+    const good = fakeFetch({ handler: () => new Response("#ifndef __CORE_CM3_H\n#define __CORE_CM3_H\n" + "x".repeat(400), { status: 200 }) });
+    const ok = await fetchOne(target, root, { fetchImpl: good });
+    assert.equal(ok.ok, true);
+    assert.match(readFileSync(join(root, "core_cm3.h"), "utf8"), /__CORE_CM3_H/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("sha256 校验（0a）：哈希对不上时拒绝落盘，错误信息带期望与实际", async () => {
+  const root = tempDir("sha");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  const result = await ensureCmsisTemplate({
+    mcu: "STM32F103C8T6",
+    env,
+    fetchImpl: fakeFetch(),
+    // 故意给一个错的期望哈希：内容是 SAMPLE_PAYLOADS 的真哈希，期望值错开一位
+    hashes: Object.fromEntries(
+      Object.entries(contentHashes()).map(([key, value]) => [key, value === "0".repeat(64) ? "1".repeat(64) : "0".repeat(64)]),
+    ),
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /sha256/u);
+  // 10 个文件全部被拒：错误信息里既有期望前缀也有实际前缀
+  assert.match(result.message, /期望/u);
+});
+
+test("sha256 校验（0a）：期望哈希正确时全部落盘（与上面的 contentHashes 注入等价）", async () => {
+  const root = tempDir("sha-ok");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  const result = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+  assert.equal(result.ok, true, result.message);
+});
+
+test("ensureCmsisTemplate：下载失败不把并发方在读的目录直接抽走，并说清半截目录去哪了（A24）", async () => {
+  const root = tempDir("stale-dir");
+  const env = { DSH_STM32_CACHE: root };
+  try {
+    const result = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch({ handler: () => new Response("nope", { status: 404 }) }) });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /半截目录/u);
+    assert.equal(existsSync(join(root, "F1", "103xb")), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("stm32_cache：不认识的 action 不再等于清空缓存；清空要 confirm（A8）", async () => {
+  const root = tempDir("cache-actions");
+  const saved = process.env.DSH_STM32_CACHE;
+  process.env.DSH_STM32_CACHE = root;
+  const entryDir = join(root, "cmsis", "F1", "x");
+  try {
+    mkdirSync(entryDir, { recursive: true });
+    writeCacheIndex(
+      {
+        version: 1,
+        updatedAt: "",
+        entries: [{ id: "cmsis:F1:x", kind: "cmsis", family: "F1", label: "x", root: entryDir, createdAt: "", totalBytes: 0, files: [], sources: [], license: "" }],
+      },
+      process.env,
+    );
+    const tool = cacheTool();
+    const exec = { signal: new AbortController().signal };
+
+    const unknown = await tool.execute({ action: "pruge" }, exec);
+    assert.equal(unknown.ok, false);
+    assert.match(unknown.message, /不认识的 action/u);
+    assert.equal(readCacheIndex(process.env).index.entries.length, 1, "拼错的 action 不许动缓存数据");
+
+    const noConfirm = await tool.execute({ action: "purge" }, exec);
+    assert.equal(noConfirm.ok, false);
+    assert.match(noConfirm.message, /confirm:true/u);
+    assert.equal(readCacheIndex(process.env).index.entries.length, 1, "没确认就不许删");
+    assert.equal(existsSync(entryDir), true);
+
+    const cleared = await tool.execute({ action: "purge", confirm: true }, exec);
+    assert.equal(cleared.ok, true);
+    assert.match(cleared.message, /实际删掉 1 个/u);
+    assert.equal(readCacheIndex(process.env).index.entries.length, 0);
+    assert.equal(existsSync(entryDir), false);
+  } finally {
+    if (saved === undefined) delete process.env.DSH_STM32_CACHE;
+    else process.env.DSH_STM32_CACHE = saved;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fetchOne：校验失败（sha256 / markers / 体量 / 网页）时必须连 .part 半成品一起删掉（T1）", async () => {
+  const root = tempDir("part-cleanup");
+  const content = "STM32F103XB_H\n/* header */\n";
+  const wrong = "0".repeat(64);
+  const cases = [
+    { name: "sha256", target: { path: "a/x.h", urls: ["https://a/x.h"], minBytes: 5, sha256: wrong }, body: content },
+    { name: "markers", target: { path: "b/x.h", urls: ["https://a/x.h"], minBytes: 5, markers: ["NOT_THERE"] }, body: content },
+    { name: "体量", target: { path: "c/x.h", urls: ["https://a/x.h"], minBytes: 999 }, body: content },
+    { name: "网页", target: { path: "d/x.h", urls: ["https://a/x.h"], minBytes: 5 }, body: "<html><body>login</body></html>" },
+  ];
+  try {
+    for (const item of cases) {
+      const fetchImpl = async () => new Response(item.body, { status: 200 });
+      const outcome = await fetchOne(item.target, root, { fetchImpl });
+      assert.equal(outcome.ok, false, item.name + "：应当失败");
+      const dir = join(root, item.target.path.split("/")[0]);
+      const parts = existsSync(dir) ? readdirSync(dir).filter((name) => name.includes(".part-")) : [];
+      assert.deepEqual(parts, [], item.name + "：校验失败后不许留下 .part 半成品，实际 " + parts.join(","));
+      assert.equal(existsSync(join(root, item.target.path)), false, item.name + "：不许留下目标文件");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/* ---------------------- F1 全系：三颗芯片的产物结构 + 哈希负向 + 旧 id 兼容 ---------------------- */
+
+test("createRegisterProject：F1 全系三种 line 各自的链接脚本 / 时钟 / 启动文件（不需要 CubeMX）", async () => {
+  const root = tempDir("register-family");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  const cases = [
+    {
+      mcu: "STM32F100VBT6",
+      startup: "startup_stm32f100xb.s",
+      define: "STM32F100xB",
+      deviceId: "STM32F100VBTx",
+      flash: "128K",
+      ram: "8K",
+      sysclk: 24_000_000,
+      // F100 的 FLASH_ACR 只有 HLFCYA，没有 LATENCY/PRFTBE：生成的代码必须整段不碰 FLASH->ACR
+      flashLatency: false,
+      ramExact: false,
+    },
+    {
+      mcu: "STM32F101VET6",
+      startup: "startup_stm32f101xe.s",
+      define: "STM32F101xE",
+      deviceId: "STM32F101VETx",
+      flash: "512K",
+      // ST 官方 STM32F101XE_FLASH.ld 的 MEMORY: RAM = 48K（手写表已收，不再走 db 的 32K 保守下限）
+      ram: "48K",
+      sysclk: 36_000_000,
+      flashLatency: true,
+      ramExact: true,
+    },
+    {
+      mcu: "STM32F107VCT6",
+      startup: "startup_stm32f107xc.s",
+      define: "STM32F107xC",
+      deviceId: "STM32F107VCTx",
+      flash: "256K",
+      ram: "64K",
+      sysclk: 72_000_000,
+      flashLatency: true,
+      ramExact: true,
+    },
+  ];
+  try {
+    for (const item of cases) {
+      const targetDir = join(root, item.mcu);
+      const report = await createRegisterProject({
+        targetDir,
+        projectName: "blink_" + item.mcu.slice(-4).toLowerCase(),
+        mcu: item.mcu,
+        env,
+        fetchImpl: fakeFetch(),
+        hashes: contentHashes(),
+      });
+      assert.equal(report.ok, true, item.mcu + " 应当建成功：" + report.message);
+      assert.equal(report.mcu, item.mcu);
+      assert.equal(report.route, "register");
+      assert.equal(report.startup, item.startup);
+      assert.equal(report.deviceDefine, item.define);
+      assert.equal(report.deviceId, item.deviceId);
+      assert.equal(report.linkerScript, item.deviceId + "_FLASH.ld");
+      assert.equal(report.sysclkHz, item.sysclk, item.mcu + " 的 SYSCLK");
+      assert.equal(report.templateFiles, 12);
+      assert.equal(report.driverFiles, 10);
+      assert.equal(existsSync(join(targetDir, "Core", "Src", "rtt.c")), true, item.mcu + " 也要带 rtt.c");
+
+      const ld = readFileSync(join(targetDir, report.linkerScript), "utf8");
+      assert.match(ld, new RegExp("Linker script for " + item.deviceId + " series", "u"));
+      assert.match(ld, new RegExp("LENGTH = " + item.flash, "u"), item.mcu + " 的 FLASH 长度");
+      assert.match(ld, new RegExp("LENGTH = " + item.ram, "u"), item.mcu + " 的 RAM 长度");
+
+      const cmake = readFileSync(join(targetDir, "CMakeLists.txt"), "utf8");
+      assert.match(cmake, new RegExp(item.startup.replace(/\./gu, "\\."), "u"));
+      assert.match(cmake, new RegExp(item.deviceId + "_FLASH\\.ld", "u"));
+      assert.equal(cmake.includes("__LINKER_SCRIPT__"), false);
+
+      const main = readFileSync(join(targetDir, "Core", "Src", "main.c"), "utf8");
+      assert.match(main, new RegExp("DSH_SYSCLK_HZ\\s+" + String(item.sysclk), "u"));
+      assert.match(main, /static void clock_init\(void\)/u);
+      assert.equal(main.includes(item.mcu), true, item.mcu + " 必须写进 main.c 的芯片注释（换板子先看这一行）");
+      if (item.flashLatency) {
+        assert.match(main, /FLASH->ACR/u, item.mcu + " 要设 Flash 等待周期");
+      } else {
+        assert.equal(main.includes("FLASH->ACR"), false, item.mcu + " 没有 LATENCY 位，不许写 FLASH->ACR");
+      }
+      // RAM 只能取 CubeMX db 的保守下限时（真值未知）必须说出来，不能悄悄按 20K 处理
+      const notes = report.warnings.join("；");
+      if (!item.ramExact) assert.match(notes, /RAM/u);
+      assert.match(notes, /clock_init\(\)|SYSCLK/u);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("sha256 负向（0a）：14 个启动文件里改一个字节，必须拒绝落盘并报期望/实际", async () => {
+  const root = tempDir("sha-flip");
+  const env = { DSH_STM32_CACHE: join(root, "cache") };
+  const startup = "startup_stm32f101xb.s";
+  const startupPath = "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/" + startup;
+  const expected = contentHashes({ [startupPath]: hashOf(payloadFor(startup)) });
+  const flip = (url) => {
+    const name = url.split("/").pop();
+    if (name !== startup) return new Response(payloadFor(name), { status: 200 });
+    const text = payloadFor(name);
+    // 只动一个字节（位置在注释区里，不会破坏 markers，专测 sha256 这一关）
+    const at = text.indexOf("/* ") + 3;
+    const ch = text[at] === "a" ? "b" : "a";
+    return new Response(text.slice(0, at) + ch + text.slice(at + 1), { status: 200 });
+  };
+  try {
+    const result = await ensureCmsisTemplate({ mcu: "STM32F101VBT6", env, fetchImpl: fakeFetch({ handler: flip }), hashes: expected });
+    assert.equal(result.ok, false, "改了一个字节还落盘就是哈希校验失效");
+    assert.match(result.message, /sha256/u);
+    assert.match(result.message, /期望/u);
+    assert.equal(existsSync(join(root, "cache", "F1", "101xb", startupPath)), false);
+    // 索引里不该出现"半个模板也算缓存好了"的条目
+    assert.equal(readCacheIndex(env).index.entries.length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("缓存 id 泛化：0.1 的 cmsis:F1:startup_stm32f103xb 老条目仍能命中与删除", async () => {
+  const root = tempDir("legacy-id");
+  const env = { DSH_STM32_CACHE: root };
+  const saved = process.env.DSH_STM32_CACHE;
+  try {
+    const first = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: fakeFetch(), hashes: contentHashes() });
+    assert.equal(first.ok, true, first.message);
+    assert.equal(readCacheIndex(env).index.entries[0].id, "cmsis:F1:103xb");
+
+    // 把索引改回 0.1 时代的 id（升级用户就这么躺着）——文件和目录都没动
+    const legacy = readCacheIndex(env).index;
+    legacy.entries[0].id = "cmsis:F1:startup_stm32f103xb";
+    writeCacheIndex(legacy, env);
+
+    const neverFetch = async () => {
+      throw new Error("老 id 也必须命中，不该联网");
+    };
+    const second = await ensureCmsisTemplate({ mcu: "STM32F103C8T6", env, fetchImpl: neverFetch });
+    assert.equal(second.ok, true, second.message);
+    assert.equal(second.cacheHit, true, "老 id 缓存要当命中，不能重下 10 MB");
+
+    process.env.DSH_STM32_CACHE = root;
+    const tool = cacheTool();
+    const exec = { signal: new AbortController().signal };
+
+    // list / verify 的 id 也认老 id 与型号写法
+    for (const id of ["cmsis:F1:startup_stm32f103xb", "F1:B", "STM32F103C8T6"]) {
+      const listed = await tool.execute({ action: "list", id }, exec);
+      assert.equal(listed.ok, true, id + " 应当能解析：" + listed.message);
+      assert.equal(listed.entries.length, 1, id + " 应当解析到那一条");
+      if (id !== "cmsis:F1:startup_stm32f103xb") assert.match(listed.message, /别名/u, id + " 要被解析成老 id");
+    }
+
+    // purge 用老 id 也要删得掉（否则升级用户永远清不掉旧缓存）
+    const purged = await tool.execute({ action: "purge", id: "cmsis:F1:startup_stm32f103xb" }, exec);
+    assert.equal(purged.ok, true, purged.message);
+    assert.equal(readCacheIndex(env).index.entries.length, 0);
+    assert.equal(existsSync(join(root, "F1", "103xb")), false);
+  } finally {
+    if (saved === undefined) delete process.env.DSH_STM32_CACHE;
+    else process.env.DSH_STM32_CACHE = saved;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

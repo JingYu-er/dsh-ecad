@@ -1,0 +1,135 @@
+/**
+ * 工程目录约定（S95）的离线单测。
+ *
+ * 断言的是「哪一层被当成程序目录、哪一层被当成硬件目录」：这两个答案决定了
+ * 引脚/时钟读哪个 .ioc、原理图读哪个 .kicad_sch。真实工程有无数种摆法，
+ * 这里只钉住约定式布局、老式布局、conf 覆盖三种。
+ */
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+
+import { readProjectConf, scanWorkspaceProjects, writeProjectConf } from "../lib/engine/project-conf.js";
+import { resolveProjectLayout } from "../lib/engine/project-layout.js";
+import { resolveFirmwareDir } from "../lib/tools/project-dir.js";
+
+function tempProject(name) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-layout-" + name + "-"));
+  return root;
+}
+
+function touch(dir, name, body = "") {
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, name), body, "utf8");
+}
+
+test("约定式布局：program/ 与 hardware/ 各自被认出（S95）", () => {
+  const root = tempProject("convention");
+  touch(path.join(root, "program"), "blink.ioc", "");
+  touch(path.join(root, "program"), "CMakeLists.txt", "");
+  touch(path.join(root, "hardware"), "board.kicad_pro", "");
+  touch(path.join(root, "hardware"), "board.kicad_sch", "");
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.projectDir, root);
+  assert.equal(layout.firmwareDir, path.join(root, "program"));
+  assert.equal(layout.hardwareDir, path.join(root, "hardware"));
+  assert.equal(layout.configDir, path.join(root, ".dsh-stm32"));
+  assert.ok(layout.notes.length > 0, "要给出判定依据");
+});
+
+test("老式布局：程序在根、KiCad 在子目录，靠扫描找到硬件目录（S95）", () => {
+  const root = tempProject("legacy");
+  touch(root, "blink.ioc", "");
+  touch(path.join(root, "D_NFC"), "D_NFC.kicad_pro", "");
+  touch(path.join(root, "D_NFC"), "D_NFC.kicad_sch", "");
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.firmwareDir, root, "根上有 .ioc 就是程序目录");
+  assert.equal(layout.hardwareDir, path.join(root, "D_NFC"));
+});
+
+test("conf 里显式写 firmware/hardware 时优先于约定（S95）", () => {
+  const root = tempProject("conf");
+  touch(path.join(root, "firmware"), "fw.ioc", "");
+  touch(path.join(root, "hw-main"), "main.kicad_pro", "");
+  assert.ok(writeProjectConf(root, { firmware: "firmware", hardware: "hw-main" }));
+  const conf = readProjectConf(root);
+  assert.equal(conf.firmware, "firmware");
+  assert.equal(conf.hardware, "hw-main");
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.firmwareDir, path.join(root, "firmware"));
+  assert.equal(layout.hardwareDir, path.join(root, "hw-main"));
+});
+
+test("没有 KiCad 工程时 hardwareDir 为空串，不猜目录（S95）", () => {
+  const root = tempProject("empty");
+  touch(root, "blink.ioc", "");
+  assert.equal(resolveProjectLayout(root).hardwareDir, "");
+});
+
+test("工作区扫描：根是工程时只列它自己，内部的 program/hardware 不算兄弟工程（S95）", () => {
+  const root = tempProject("scan");
+  touch(root, "blink.ioc", "");
+  touch(path.join(root, "hardware"), "board.kicad_pro", "");
+  touch(path.join(root, "program"), "CMakeLists.txt", "");
+  const found = scanWorkspaceProjects(root);
+  assert.deepEqual(found.map((item) => item.name), [path.basename(root)]);
+});
+
+test("工作区扫描：约定式工程被认出来，构建产物与 .dsh-stm32 不会混进来（S95）", () => {
+  const root = tempProject("scan2");
+  const project = path.join(root, "nfc");
+  touch(path.join(project, "firmware"), "nfc.ioc", "");
+  touch(path.join(project, "hardware"), "nfc.kicad_pro", "");
+  touch(path.join(root, "build"), "CMakeLists.txt", "");
+  touch(path.join(root, ".dsh-stm32"), "CMakeLists.txt", "");
+  const found = scanWorkspaceProjects(root);
+  assert.deepEqual(found.map((item) => item.name), ["nfc"]);
+});
+
+test("工具层把工程根解析成程序目录（S96）", async () => {
+  const root = tempProject("tool-firmware");
+  touch(path.join(root, "program"), "blink.ioc", "");
+  fs.writeFileSync(path.join(root, "CMakeLists.txt"), "project(blink)", "utf8");
+  const ctx = { get: () => undefined };
+  const resolved = await resolveFirmwareDir(ctx, root, undefined);
+  assert.equal(resolved.projectDir, path.join(root, "program"));
+  assert.match(resolved.note ?? "", /程序目录/u);
+  const plain = tempProject("tool-root");
+  touch(plain, "root.ioc", "");
+  const kept = await resolveFirmwareDir({ get: () => undefined }, plain, undefined);
+  assert.equal(kept.projectDir, plain, "程序在根上的老工程保持原样");
+});
+
+test("自定义目录名：fw/ 里的 .ioc 也能被扫到（S127）", () => {
+  const root = tempProject("fw-name");
+  touch(path.join(root, "fw"), "tetris.ioc", "Mcu.Name=STM32F303CCTx\n");
+  touch(path.join(root, "fw"), "CMakeLists.txt", "");
+  touch(path.join(root, "pc"), "demo.c", "");
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.firmwareDir, path.join(root, "fw"), "fw 不在候选名里，要能靠扫描找到");
+  assert.match(layout.notes.join(" / "), /fw/u, "notes 要写清楚是哪一层");
+});
+
+test("conf 里点名 .ioc 时以它所在目录为准（S127）", () => {
+  const root = tempProject("conf-ioc");
+  touch(path.join(root, "firmware-app"), "main.ioc", "Mcu.Name=STM32F103C8Tx\n");
+  writeProjectConf(root, { ioc: "firmware-app/main.ioc" });
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.firmwareDir, path.join(root, "firmware-app"));
+  assert.match(layout.notes.join(" / "), /conf 里的 \.ioc 在 firmware-app/u);
+});
+
+test("根上只有工作区索引时顺着索引进唯一子工程（S127）", () => {
+  const root = tempProject("index-root");
+  const child = path.join(root, "handheld");
+  touch(path.join(child, "Core"), "main.c", "");
+  writeProjectConf(root, {});
+  const indexText = "# 工作区索引\nversion=1\nproject=handheld\n";
+  fs.writeFileSync(path.join(root, "dsh-stm32.conf"), indexText, "utf8");
+  const layout = resolveProjectLayout(root);
+  assert.equal(layout.firmwareDir, child);
+  assert.match(layout.notes.join(" / "), /工作区索引/u);
+});
