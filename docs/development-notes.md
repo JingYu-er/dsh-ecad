@@ -6186,7 +6186,7 @@ tscircuit 是原理图与 PCB 的唯一写者，每次 `stm32_ecad_build` 都会
 
 ### 一百七十七、网表门禁：图纸比板子新，就直说「板子旧了」（S169）
 
-`stm32_sch_check` 能一次把原理图与板子对完账，但它回答的是「现在对不对」；真正会出事的是「改完原理图忘了同步到板子」——那时两边都自洽，只是板子是旧的。
+`ecad_sch_check` 能一次把原理图与板子对完账，但它回答的是「现在对不对」；真正会出事的是「改完原理图忘了同步到板子」——那时两边都自洽，只是板子是旧的。
 
 **四条判断，只有一条靠时间戳**
 
@@ -6337,7 +6337,7 @@ P3 的第三项。S158 的 EMC 体检只回答「电源线够不够宽、有没�
 2. `wmsc.lcsc.com/wmsc/search/global` 已下线，回 `404 The static resource is unavailable`。
 3. 前端自己在用的是 `POST wmsc.lcsc.com/ftps/wm/search/third`，body `{keyword, currentPage, pageSize}`，带回 `totalCount` 与 `productList`（编号、型号、品牌、库存、起订、阶梯价、手册地址）。不需要登录，也不吃 cookie。
 
-落点：`src/engine/datasheet/search.ts` 只做三件事——拼请求、把回包削成稳定的 `PartHit`、按查询缓存 24 小时（`~/.dsh-stm32/part-search.json`，上限 200 条，`refresh` 才绕开）。工具 `stm32_part_search`（第 55 个）、路由 `/ecad/parts`（第 60 条，`?q=&limit=&page=&refresh=1`）、面板「器件搜索」区块（输入框 + 回车/按钮才联网）。
+落点：`src/engine/datasheet/search.ts` 只做三件事——拼请求、把回包削成稳定的 `PartHit`、按查询缓存 24 小时（`~/.dsh-stm32/part-search.json`，上限 200 条，`refresh` 才绕开）。工具 `ecad_part_search`（第 55 个）、路由 `/ecad/parts`（第 60 条，`?q=&limit=&page=&refresh=1`）、面板「器件搜索」区块（输入框 + 回车/按钮才联网）。
 
 三条必须如实说的话：
 
@@ -6407,7 +6407,7 @@ DXF 只写 R12 的 `ENTITIES`（`LINE` × 4 + 每个**定位孔**一个 `CIRCLE`
 
 线上的判据复用 EMC 的 IPC-2221：`requiredWidthMm(I)`，1 A ≈ 0.302 mm（外层 1 oz、ΔT 10 ℃）。输入电流按最高电源轨电压与效率（默认 0.85）折算，只作电源选型参考。
 
-器件的 IDD 不在这里猜：那要读手册电气特性表，随器件变；需要时 `stm32_pdf_read` 的 `table` 模式把表抽出来，再填进 `currents`。
+器件的 IDD 不在这里猜：那要读手册电气特性表，随器件变；需要时 `ecad_pdf_read` 的 `table` 模式把表抽出来，再填进 `currents`。
 
 工具 `stm32_power`（第 53 个，参数 `projectDir/boardFile/currents/voltages/inputV/efficiency`）、路由 `/ecad/power`（第 57 条）、面板「电源预算」区块。
 
@@ -7519,7 +7519,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 验收不看「像不像」，看能不能对上出货数据：主控 `U18` 的 20 个脚，原理图解析出的网络与 `D_NFC.kicad_pcb` 焊盘网络 **20/20 一致**；全板 25 个有名字、≥2 焊盘的网络 **23 个连通性一致**，`GND` / `VCC` 各被拆成两段（原因都是电源符号直接压在引脚上、没有压在导线上），**没有任何错误合并**。单张 279 KB 图纸全流程 0.21 s。
 - 规则按实测放宽或收紧，避免把解析噪声报成设计错误：SWD 与 BOOT0 按网络名认（KiCad 的 STM32 符号里 PA13/PA14 是普通脚，调试口只体现在网络名）；`no-connect.conflict` 只对有人起名字的网络报；`pcb.net-split` 降为 warning；PCB 名字不一致只在「两边都是人起的名字」时比较，自动名（`N$12` / `Net-(...)`）不可比。
 - 模块框图（S90 的面板页签）不画原理图，只回答「哪两块电路连在一起、走什么总线」：无源器件不单独成框，自动网络名不画线，同一对框之间的多条网络合成一条，标签优先写总线（`SCL+SDA → I2C`）。本板因此得到 `U17—U18 I2C`，正是用户举例要看到的样子。框按连接数排序，读图时先看到与主控关系最密的模块。
-- 工具：`stm32_sch_read`（图纸树 / 元件 / 网络 / 框图）、`stm32_sch_pins`（引脚矩阵 + CubeMX 数据库给出的信号候选）、`stm32_sch_check`（原理图检查 + `.ioc` 与 `.kicad_pcb` 对账）。只读，不改原理图，也不改工程配置。
+- 工具：`ecad_sch_read`（图纸树 / 元件 / 网络 / 框图）、`ecad_sch_pins`（引脚矩阵 + CubeMX 数据库给出的信号候选）、`ecad_sch_check`（原理图检查 + `.ioc` 与 `.kicad_pcb` 对账）。只读，不改原理图，也不改工程配置。
 - 验证：`test/schematic-units.test.mjs` 13 条（含夹具回归）、全量 **1101 pass / 0 fail**、ACCEPTANCE OK（新增夹具解析、I2C 连线、PCB 对账、空目录 404 四项）、`test:size` 1970.6 KB / 303 文件 / 解包 15792.9 KB。
 - 教训：**解析器的正确性要用外部数据反证**。自己写的 S-expression 遍历器能把任何输入「解析成功」，只有拿 PCB 的焊盘网络对一遍，才知道坐标变换与并查集是不是真的对。另一个教训是词法与数值：`Number(node[1])` 在传入字符串时取的是第二个字符（`"-12.7"` → `1`），这类错误不会抛异常，只会让所有坐标悄悄变形。
 
@@ -7549,9 +7549,9 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 
 ### 一百、原理图工具没把 exec 传下去（S93）
 
-- 起因：S92 之后重启，面板仍显示「当前没有可用的工程目录」。同一次会话里，不带 `projectDir` 的两个工具结果相反：`stm32_doctor` 能解析出 `D:\JingYu\Desktop\c8t6_vscode_test\demo`，`stm32_sch_read` 却落到 `C:\Users\Admin\.dsh\profiles\desktop`（插件进程的 cwd）。
+- 起因：S92 之后重启，面板仍显示「当前没有可用的工程目录」。同一次会话里，不带 `projectDir` 的两个工具结果相反：`stm32_doctor` 能解析出 `D:\JingYu\Desktop\c8t6_vscode_test\demo`，`ecad_sch_read` 却落到 `C:\Users\Admin\.dsh\profiles\desktop`（插件进程的 cwd）。
 - 结论：宿主 `workingDirectory` 服务是好的，断在参数传递。`src/tools/schematic.ts` 三处 `resolveProjectDir(ctx, args.projectDir, {} as ToolExec)` 传的是空对象，`exec.agent` 恒为 undefined——既登记不了会话对照表，也换不到会话目录，只能走 `process.cwd()` 兜底。
-- 改法：三个工具（`stm32_sch_read` / `stm32_sch_pins` / `stm32_sch_check`）的 `execute` 增第二参 `exec: ToolExec` 并原样传进 `resolveProjectDir`。全仓再查 `{} as ToolExec` 已无残留。
+- 改法：三个工具（`ecad_sch_read` / `ecad_sch_pins` / `ecad_sch_check`）的 `execute` 增第二参 `exec: ToolExec` 并原样传进 `resolveProjectDir`。全仓再查 `{} as ToolExec` 已无残留。
 - 验证：`test/schematic-units.test.mjs` 增 1 条（不带 `projectDir`、只给 `exec.agent`，应解析出夹具并登记会话），全量 **82 个套件 / 1107 pass / 0 fail**，ACCEPTANCE OK，`test:size` 1973.6 KB / 303 文件 / 解包 15801.3 KB。
 - 教训：**新工具照抄旧工具时，最容易漏掉的是第二个参数**。类型上 `{} as ToolExec` 能过编译，运行时只是静默降级；凡是「拿不到身份就换默认值」的接口，写完要立刻用一个真 agent 跑一遍，否则缺陷会以「功能不生效」的形态出现在用户那里，而不是出现在错误里。
 
@@ -7704,7 +7704,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 
 - 起因：流程图能画对，靠的是引擎里的聚合规则（模块分类、共网投票、总线归纳、电源剔除），但这些规则只存在于代码里；模型读图时看不到口径，用户也无从判断「为什么这两个器件画在一起」。
 - 改法：同一套规则写进三个用户可见的位置，保持一份口径。
-  - `stm32_sch_read` 的工具说明：从「模块框图」扩成「按功能模块聚合：主控、NFC 天线与标签、光检测、供电、调试接口、按键，模块之间按总线类型连线，不逐元件罗列」。
+  - `ecad_sch_read` 的工具说明：从「模块框图」扩成「按功能模块聚合：主控、NFC 天线与标签、光检测、供电、调试接口、按键，模块之间按总线类型连线，不逐元件罗列」。
   - 技能文本 `src/skill/stm32-workflow.ts` 新增「## 五、流程图怎么看」：六类模块、连线只在模块之间、总线名归纳、电源网络单独列、布局规则，并写明「不要用框图的连线数量推断电气连接条数」。
   - 两版 README 各加「### 流程图规则 / Diagram rules」：同样五条，面向读文档的人。
 - 测试：`test/schematic-units.test.mjs` 增 1 条，断言工具说明含「功能模块」、技能文本含「流程图怎么看 / 按功能聚合 / 电源不上线」——规则一旦从代码里漂移，这条会先红。
@@ -7793,7 +7793,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - `src/engine/schematic/to-ioc.ts`：`draftIoc(schematic, facts)` 逐脚给出 `signal / confidence / candidates / note`，并归纳 `peripherals`（`I2C1:PA4` 这种前缀）与 `gpioPins`（键、灯这类纯 GPIO 网络的输入/输出建议）。没有器件库时直接给「先装 CubeMX 或取器件包」的下一步，不返回空表。
 - 匹配规则（三条都是踩过才加的）：① 网络名与脚名相同（`PA4` 这类默认名）不算连接，跳过并计数；② 引脚名本身不参与词元匹配（否则 `PB1` 会把 `SYS_VREF_OUT_PB1` 顶上来）；③ 只有词元真的重合才算匹配，`best` 非空但零重合按「对不上」处理。
 - 实测（D_NFC 的 U18 / STM32L021F4Ux，CubeMX db `DB.6.0.181`）：`PA13 SYS_SWDIO → SYS_SWDIO`（high）、`PA14 SYS_SWCLK → SYS_SWCLK`（high）、`PA6/PA7 → ADC_IN6/ADC_IN7`（high）、`PA4 PA4/SCL → I2C1_SCL`（medium）、`PB9 BOOT0` 判为专用脚；`PA5` 的网络名是 `SDA`，但这颗芯片的 PA5 只有 SPI1_SCK / TIM2_CH1，落进待确认——**这正是不该硬配的地方**。
-- 工具：`stm32_sch_to_ioc`，输出同上，render 逐脚列「脚 → 信号 [置信度]」与待确认清单。工具共 36 个。
+- 工具：`ecad_sch_to_ioc`，输出同上，render 逐脚列「脚 → 信号 [置信度]」与待确认清单。工具共 36 个。
 - 验证：`test/schematic-units.test.mjs` 增 2 条（用合成器件库断言匹配与待确认、没有器件库时报下一步）；全量 **83 套件 / 1153 pass / 0 fail**；ACCEPTANCE OK；`test:size` 2032.1 KB / 315 文件 / 16003.1 KB。
 - 教训：**把连接读出来只是第一步，能不能配成还得问器件库**。同一个网络名在别的封装上可能是合法复用，在手上这颗芯片上未必——草案里把候选摆全，比直接生成一份看起来正确的 `.ioc` 有用。
 
@@ -7802,7 +7802,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 起因：D_NFC 的 PA5 网络名是 `SDA`，但这颗 STM32L021 的 PA5 没有 I2C 复用。规范上不是绝路——两个 GPIO 开漏也能模拟 I2C，只要满足客户需求就该给出这条路；但硬件外设始终是首选，软件模拟必须带来代价说明。
 - `src/engine/schematic/to-ioc.ts`：新增 `protocolOf(net)`（`SCL/SDA → I2C`、`MOSI/MISO/SCK/CS → SPI`、`TX/RX → UART`）与 `softwareTradeoff(protocol)`；匹配失败且有协议可模拟时，往 `softwareFallbacks` 里加一条 `{pin, net, protocol, suggestion, tradeoff}`，同时仍进 `unresolved`。
 - 文案口径：I2C 写「两个 GPIO 开漏 + 上拉，速率通常 100 kHz 以内，占 CPU，时序受中断影响」；SPI 写「GPIO 逐位翻转，速率与稳定性都低于硬件 SPI」；UART 写「GPIO + 定时器采样，波特率误差与 CPU 占用都要算清楚」。
-- 工具 `stm32_sch_to_ioc` 输出增 `softwareFallbacks`，render 多一行「软件模拟：PA5 PA5/SDA（I2C）— …」；说明里加「先按协议换脚更稳」。
+- 工具 `ecad_sch_to_ioc` 输出增 `softwareFallbacks`，render 多一行「软件模拟：PA5 PA5/SDA（I2C）— …」；说明里加「先按协议换脚更稳」。
 - 技能文本「## 一、方案先行」的风险与备选一条改为：先给硬件方案（换脚、换外设实例、加外部器件），再给软件模拟作为退路，并写清速率上限、CPU 占用、时序受中断影响的程度。
 - 实测：D_NFC 的 PA5 现在同时出现在 `unresolved` 与 `softwareFallbacks`（protocol `I2C`），`pa5.signal` 仍为空——不把软件模拟伪装成硬件配置。
 - 验证：`test/schematic-units.test.mjs` 增 1 条断言（PA5 的 `softwareFallbacks` 存在、protocol 为 I2C、tradeoff 含开漏/上拉/100 kHz/CPU）；83 套件 / 1153 pass / 0 fail；ACCEPTANCE OK；`test:size` 2033.2 KB / 315 文件 / 16006.3 KB。
@@ -7838,14 +7838,14 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
   - `pdftocairo -svg` 一页 88 KB、127 个 `<path>`，但 `<text>` 为 0：文字被转成字形轮廓。
 - 结论与分工：文字/表格走 `pdftotext`（真实字符，精确）；曲线与框图走 `pdftoppm` 渲染后读图（估读，误差约 ±0.5 个最小刻度）；原理图的线段走 `pdftocairo`。三者都来自 poppler 一个 pacman 包，不引入 pymupdf。
 - 支持度检测：KiCad 默认导出的 PDF 用 Type3「KiCadStroke」描边字体，正文是 `(\001) Tj` 字形码，`pdftotext` 取不出可读文本。所以 `readPdfInfo()` 先抽第一页判断文字层，描边字体时明确写「只能按图看」，不输出瞎猜结果；导出时加 `--default-font Arial` 可让文字可提取。
-- 实现：`src/engine/pdf/toolchain.ts`（定位三个 CLI，缺失时给 pacman 命令）、`src/engine/pdf/reader.ts`（`readPdfInfo` / `extractPdfText` / `listFigures` / `renderPdfPage`，渲染落盘到临时目录并读回 PNG 尺寸）、`src/tools/pdf.ts` 的 `stm32_pdf_read`（mode = info / text / figures / render，render 支持 dpi 与像素级 crop）。
+- 实现：`src/engine/pdf/toolchain.ts`（定位三个 CLI，缺失时给 pacman 命令）、`src/engine/pdf/reader.ts`（`readPdfInfo` / `extractPdfText` / `listFigures` / `renderPdfPage`，渲染落盘到临时目录并读回 PNG 尺寸）、`src/tools/pdf.ts` 的 `ecad_pdf_read`（mode = info / text / figures / render，render 支持 dpi 与像素级 crop）。
 - 工具链：poppler 进 `probe.buildTargets()`（`pdftotext -v` 自检，影响写清「PDF 读取不可用，其余功能不受影响」）、`install-guides.ts` 的 `popplerGuide()`、能力标签 `pdf`（`CAPABILITY_COMPONENTS.pdf = ["poppler"]`）。
 - 验证：`test/pdf-units.test.mjs` 6 条（定位、文字层判定、分页切分、图注解析、crop 参数透传、能力只依赖 poppler）；全量 **87 个套件 / 1161 pass / 0 fail**；真机 `readPdfInfo` 报 110 页 A4、文字层 true，`extractPdfText` 第 44 页 2300 字，`listFigures` 认出 Figure 14，`renderPdfPage` 200 dpi 出 1654×2339 PNG。
 - 教训：**读 PDF 的关键不是解析器，而是分清「哪部分是字符、哪部分是像素」**。字符能精确引用，像素只能描述形态与量级；两者混着说，就会出现「看起来精确、其实估的」答案。
 
 ### 一百二十六、PDF 表格结构化：词框聚行列，宁可少切不可乱切（S118）
 
-- 目标：`stm32_pdf_read mode=table` 直接把数据手册里的参数表读成 `{columns, rows}`，让「VDD 范围多少」这类问题不必先读整页文本再人工对列。
+- 目标：`ecad_pdf_read mode=table` 直接把数据手册里的参数表读成 `{columns, rows}`，让「VDD 范围多少」这类问题不必先读整页文本再人工对列。
 - 第一版按 `pdftotext -layout` 的空格切列：一张表被切成 6 个碎片（表头被当正文、跨行单元格打断分块），直接放弃。空格数量在 PDF 里不是列边界，词与词之间的距离才是。
 - 终版 `src/engine/pdf/tables.ts`（输入是 `pdftotext -bbox` 的词框）：
   - `clusterRows(words, tol=3.2)` 按 `y0` 聚成行；`columnSeparators()` 先取表头行的间隙（≥6pt），再补正文里出现率 ≥30% 的间隙，合并时容差 30pt——否则同一列界会被表头与表体各记一次，切出空列。
@@ -7865,8 +7865,8 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 缓存布局：`~/.dsh-stm32/datasheets/<编号>/{meta.json,<sha256 前 12 位>.pdf}` + 顶层 `index.json`；索引丢了会从各目录 `meta.json` 重建（缓存目录被人手工动过时的自愈）。命中判据是「PDF 存在且 sha256 对得上」，不是「文件存在」。
 - 失败留痕：`_negative/<编号>.json` 记原因与时间，24 小时内不重试；`refresh` 可强制重试。离线（`DSH_STM32_OFFLINE=1`）只读缓存。
 - 礼貌：两次请求之间至少 1.5 s（`DSH_STM32_DS_MIN_GAP_MS` 可调），UA 写明用途，单份上限 40 MB，内容必须是 `%PDF-`；`meta.json` 永久记录来源地址与抓取时间，引用时可回溯。
-- 工具：`stm32_ds_fetch`（按编号 / `all` 补齐本工程 jlcpcb 器件 / `file` 手工导入）、`stm32_ds_list`（编号、型号、占用、时间）；`stm32_pdf_read` 的 `file` 支持直接写 `C25137` 或型号，命中缓存时按本地路径读并在 notes 里标注来源。
-- 真机：`C25137` 首次 467,557 B 落盘、二次调用 0 请求（`cached: true`）、`stm32_ds_list` 显示 1 份 457 KB；假 fetch 的单测覆盖「首次下载 → 命中缓存零请求 → 负缓存不重试 → 离线报错 → 手工导入」。
+- 工具：`ecad_ds_fetch`（按编号 / `all` 补齐本工程 jlcpcb 器件 / `file` 手工导入）、`ecad_ds_list`（编号、型号、占用、时间）；`ecad_pdf_read` 的 `file` 支持直接写 `C25137` 或型号，命中缓存时按本地路径读并在 notes 里标注来源。
+- 真机：`C25137` 首次 467,557 B 落盘、二次调用 0 请求（`cached: true`）、`ecad_ds_list` 显示 1 份 457 KB；假 fetch 的单测覆盖「首次下载 → 命中缓存零请求 → 负缓存不重试 → 离线报错 → 手工导入」。
 - 教训：**外部资源的缓存要把「谁下的、什么时候、内容是否还是那份」一起记下来**；只存文件不存出处，等于下次还得重下，也不敢在方案里引用。
 
 ### 一百二十八、构建后自动补手册，面板看得到缺口（S120）
@@ -7882,7 +7882,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 
 - 需求：手册几十上百页，设计时真正要看的就四五处。与其每次全文搜索，不如第一次读前 40 页记下「哪类信息在第几页」。
 - `src/engine/datasheet/digest.ts`：`detectSections(pages)` 逐行匹配五类章节标题（引脚、绝对最大额定值、电气特性、时序、封装），允许 `5.2 ` 这类编号前缀；行首匹配、长度 4–90 字，正文里提到关键词不算。`buildDigest()` 用 `pdftotext -layout` 读前 N 页（默认 40）建索引，存 `<编号>/digest.json`（`{pages,textLayer,scanned,sections,builtAt}`）——只存页号与命中行，不存正文。
-- 工具 `stm32_ds_lookup`：`code` + `kind`（`pinout|absolute-maximum|electrical|timing|package|all`），返回每类的页号、标题与该页开头正文（默认 1200 字，最多 4000）。索引不存在时先建索引并把「首次查询，已建立索引：N 页」写进 notes。
+- 工具 `ecad_ds_lookup`：`code` + `kind`（`pinout|absolute-maximum|electrical|timing|package|all`），返回每类的页号、标题与该页开头正文（默认 1200 字，最多 4000）。索引不存在时先建索引并把「首次查询，已建立索引：N 页」写进 notes。
 - 真机校验（缓存里的 C25137，厚膜电阻手册）：`textLayer: true`，索引 `sections: []`——这类手册的标题是 `PERFORMANCE` / `CONSTRUCTION`，不在五类里，工具会明说「没有匹配的章节，换 kind 或直接按页号读」。这不是缺陷：**索引宁缺不猜**。
 - 探针踩坑：假 `subprocess` 的 `collected.stdout.readFrom()` 要返回 `{text}` 而不是字符串，否则 `runCapture` 读到的 stdout 恒为空，表现为「PDF 没有文字层」——测试替身要照真实接口的形状写。
 - 验证：`test/datasheet-units.test.mjs` 增 2 条（五种章节各命中一次且页号正确；正文里提到关键词不误报），该套件 8 条；全量 **88 套件 / 1173 pass / 0 fail**，ACCEPTANCE OK，包体 2062.0 KB / 326 文件 / 解包 16102.1 KB。
@@ -7902,7 +7902,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 
 ### 一百三十一、厂商引脚表兜底：器件库说不清时问手册（S123）
 
-- 背景：`stm32_sch_to_ioc` 的候选信号只来自 CubeMX 器件库。库对不上的脚（例如那颗 L021 的 PA5 只有 SPI1_SCK / TIM2_CH1）只能进「待确认」，但手册的引脚表里往往写着更多复用信息。
+- 背景：`ecad_sch_to_ioc` 的候选信号只来自 CubeMX 器件库。库对不上的脚（例如那颗 L021 的 PA5 只有 SPI1_SCK / TIM2_CH1）只能进「待确认」，但手册的引脚表里往往写着更多复用信息。
 - 做法：新工具参数 `datasheet`（立创编号或型号）→ 从缓存里取手册 → `pdftotext -bbox` 拿词框 → `extractTablesFromWords` 切表 → `readPinoutTables` 认「Pin name」列与「Alternate / Additional / Function」列 → `pinFunctionIndex` 得到「脚 → 功能清单」→ 传给 `draftIoc` 的 `pinFunctions`。
 - 优先级写死：器件库能解析的脚一律用库；只有库缺信号时手册才参与，且结果标 `source: "datasheet"`、备注「信号来自厂商手册引脚表」。两边都不认时，才进 `unresolved` 与软件模拟退路。
 - 归一化的坑：手册脚名常写成 `PB9-BOOT0`、`PA5/ADC_IN5`，按 `-` `/` `,` 与空格切分，第一段当名字、其余进别名；一开始只切空格与 `/`，`PB9-BOOT0` 被拼成 `PB9BOOT0` 直接丢掉。
@@ -7913,7 +7913,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 图例 → 名字：手册图例是「一小段彩色线段 + 一个词」。从 bbox 拿到词框，在词左侧 30 pt 宽的区域里数色相，出现最多的色相就是这个色块的颜色，于是 `Mean/Min/Max` 有了确定归属，不再只按色相命名。判定门槛：至少 12 个彩色像素、词至少两个字符、每个色相只认第一个词。
 - 同页多图：先把彩色像素的外接框量出来（`chromaBounds`，灰度不算），刻度候选只保留落在框内（带 25% 外扩）的那些。此前同一页有两张图时会标定到隔壁那张，曲线数值整体偏移。
 - 刻度间距判据从「绝对像素间距过大」改成「间距不均匀度 > 40%」：绝对间距取决于 dpi，本来就不该报警；真正影响拟合的是刻度是否等距。
-- 缓存清理：`stm32_ds_list` 增 `remove`（按编号）与 `olderThanDays`（按抓取时间），返回删了哪些、释放多少字节、还剩哪些；不做容量上限。写回索引时必须带上 `version: 1`，少了它 `readIndex` 判为「空索引」，表面现象是「清理完之后列表全空」。
+- 缓存清理：`ecad_ds_list` 增 `remove`（按编号）与 `olderThanDays`（按抓取时间），返回删了哪些、释放多少字节、还剩哪些；不做容量上限。写回索引时必须带上 `version: 1`，少了它 `readIndex` 判为「空索引」，表面现象是「清理完之后列表全空」。
 - 面板：手册行显示「x/y（N.N MB）」，删除仍走工具——破坏性动作不给一键按钮。
 - 质量债：`serial-units` 的 CI 抖动把交互超时放宽到 6 s、idle 用例先 `open`/`close` 热一次桥进程再测；探针文件（`.probe/`、`probe-*.pdf`）已从工作区清掉。
 - 验证：`test/pdf-units.test.mjs` 15 条（新增外接框、图例认名、双图刻度筛选）、`test/datasheet-units.test.mjs` 9 条（新增按编号/按天数清理与释放字节）；全量 **88 套件 / 1183 pass / 0 fail**；包体 2073.7 KB / 329 文件 / 16141.0 KB。
@@ -8048,7 +8048,7 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
 - 落点：
   - `project-conf.ts` 增 `WORKSPACE_CONF_REL`；`registerWorkspaceProject()` 只写新位置；`readWorkspaceIndex()` 新位置优先、旧位置兼容（`exists` 两个位置都算）。
   - 新 `project-repair.ts`：`planLayoutFix()` 只读规划、`applyLayoutFix()` 才动文件（每份被改写的文件先存 `.bak`）。两类动作——程序目录里的工程描述并回工程根（`ioc` 改写成相对路径、补 `firmware=`）；工程根里的 `project=` 行搬到上一级索引（指向子目录的项直接丢弃，那些不是独立工程）。
-  - 工具 `stm32_layout_fix`（默认 dryRun，`apply=true` 才改）；Web `GET /layout` 只规划、`POST /layout` 执行（路由 49 → 50）。
+  - 工具 `ecad_layout_fix`（默认 dryRun，`apply=true` 才改）；Web `GET /layout` 只规划、`POST /layout` 执行（路由 49 → 50）。
 - 真机：用户工程归位后 `dsh-test/.dsh-stm32/workspace.conf` 只有一行 `project=tetris-handheld`，`tetris-handheld/dsh-stm32.conf` 为 `ioc=fw/tetris.ioc`、`firmware=fw`，`fw/` 下只剩 `.bak`；`resolveProjectLayout` 与 `readPinout` 仍读出 15 个引脚、`STM32F303CCT6`、11 个时钟节点。
 - 教训：**同一类文件不要有两种语义**。放错不是用户的错，是设计让人必须记两套规则；把「谁该在哪」变成代码里的常量，再加一个能一键归位的入口，才算解决。
 
@@ -8101,7 +8101,7 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
 - 原因：tscircuit 导出的 `.kicad_sch` 只放符号与标签，不画导线。KiCad 的 ERC 按「引脚有没有接导线」判定，于是几乎每个脚都被判成未连接——这是导出器的表达方式，不是电路错。
 - 改法：`runErc` 看两件事——`(wire` 是否为 0、`(generator circuit-json-to-kicad)` 是否存在。命中任一条就把 `pin_not_connected` 与 `power_pin_not_driven` 降级为 warning，并在 `KicadReport.notes` 写明原因（零导线 / 由哪个生成器产出）；一键设计把这些 notes 带进报告。
 - 修正过一次判断依据：新版 tscircuit 其实会画导线（该板 343 段、58 个结点），所以「零导线」不足以识别机器生成；真正的原因是生成器不写 `no_connect` 与电源标志，KiCad 便把这些脚判成未连接、电源判成未驱动。
-- 边界：只对「机器生成」或「零导线」的原理图降级；手画原理图判据不变。降级后 58 条仍在 `findings` 里可见（warning），且 DRC、网表对账（`stm32_sch_check`）仍是硬判据——不藏问题，只是不让生成器的省略冒充电路错误。
+- 边界：只对「机器生成」或「零导线」的原理图降级；手画原理图判据不变。降级后 58 条仍在 `findings` 里可见（warning），且 DRC、网表对账（`ecad_sch_check`）仍是硬判据——不藏问题，只是不让生成器的省略冒充电路错误。
 - 验证：`test/ecad-units.test.mjs` 原用例改为含一条导线（保持原断言），另加一条「没有导线时降级并说明」→ 37 条；全量 88 套件 / 1230 pass / 0 fail。
 
 ### 一百五十五、面板上的布线引擎状态与「含布线」勾选（S147）
@@ -8246,7 +8246,7 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
 - 焊盘默认合并：`stm32_ecad_design` 与 `/ecad/action` 的 `design` 分支从「显式 true 才合并」改为「默认合并、传 `false` 才关」。`stm32_ecad_build` 保持原语义（显式 true），因为单步构建要可控。
 - 原理图侧：新增 `runSchematicReview()`（`src/engine/schematic/review.ts`）三步——读图（元件、网络、主控）、规则检查（复用 `checkSchematic`）、配置草案（型号从 `.ioc` 的 `Mcu.Name` 或符号 Value 取，再走 `draftIoc` 与软件模拟退路），最后汇总「需要人决策」的脚。`ok = errors === 0`，与一键设计同一口径：**跑通不算过，检查干净才算过**。
 - 实测用户工程：读图 41 个元件 / 125 个网络、规则检查 2 错误 / 23 警告、配置草案 47 个脚全部待确认——因为该板的网络名是 `N$xx`、`U1_PA0` 这类自动名，没有协议含义，草案不敢猜，这是正确结论而不是失败。
-- 取舍：草案不自动写盘。`stm32_sch_to_ioc` 出的仍是草案，落盘要走 `stm32_ioc_plan` 的事务，这一点在 S113 就定下了。
+- 取舍：草案不自动写盘。`ecad_sch_to_ioc` 出的仍是草案，落盘要走 `stm32_ioc_plan` 的事务，这一点在 S113 就定下了。
 - 教训：**自动化的边界是「不需要判断的步骤」**。构建、检查、导库可以自动；写 `.ioc` 不行，因为那一步要人确认脚位与复用。
 
 ### 一百四十二、一键设计：把七个动作收成一条流水线（S134）

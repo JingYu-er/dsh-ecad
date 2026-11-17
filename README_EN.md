@@ -154,7 +154,7 @@ Boundaries are listed under [Known limitations](#known-limitations): HAL scaffol
 | `stm32_assets` | Lists, verifies and prunes bundled assets (chip data, `.ioc` templates, linker scripts, startup files, register tables) |
 | `stm32_cache` | Lists, verifies, fetches and prunes the download cache (register-route CMSIS templates) |
 | `stm32_project_create` | Scaffolds a project: `route:"hal"` from templates plus firmware package, `route:"register"` without CubeMX; both emit `openocd.cfg` |
-| `stm32_layout_fix` | Check and normalise the config files: the workspace index lives in `<workspace>/.dsh-stm32/workspace.conf`, the project description in the project root; dry run unless `apply=true` (backing up each rewritten file as `.bak`) |
+| `ecad_layout_fix` | Check and normalise the config files: the workspace index lives in `<workspace>/.dsh-stm32/workspace.conf`, the project description in the project root; dry run unless `apply=true` (backing up each rewritten file as `.bak`) |
 | `stm32_project_export` | Packs a project as a zip, excluding `build/`, `.dsh-stm32/`, `node_modules/`, `.git/` by default, optionally with prebuilt artifacts |
 
 ### `.ioc`: inspect and edit
@@ -181,12 +181,12 @@ The same rules ship in the plugin skill text, so reading and drawing the diagram
 
 | Tool | Purpose |
 | --- | --- |
-| `stm32_sch_read` | Read a KiCad project: sheet tree, components, nets, power nets and a block diagram (which circuits connect, over which bus) |
-| `stm32_sch_pins` | MCU pin matrix: net name, pin type, whether the pin is left open, plus reusable signal candidates from the CubeMX database |
-| `stm32_sch_check` | Check the schematic itself and reconcile it with `.ioc` and `.kicad_pcb`: missing values, missing footprints, missing SWD / BOOT0 / power, split nets |
-| `stm32_sch_to_ioc` | Turn pin connections into a `.ioc` draft: suggested signal, confidence and candidates per pin, input/output hints for plain GPIO nets, plus a software-emulation fallback with its cost when no hardware function fits; read-only, never writes `.ioc` |
+| `ecad_sch_read` | Read a KiCad project: sheet tree, components, nets, power nets and a block diagram (which circuits connect, over which bus) |
+| `ecad_sch_pins` | MCU pin matrix: net name, pin type, whether the pin is left open, plus reusable signal candidates from the CubeMX database |
+| `ecad_sch_check` | Check the schematic itself and reconcile it with `.ioc` and `.kicad_pcb`: missing values, missing footprints, missing SWD / BOOT0 / power, split nets |
+| `ecad_sch_to_ioc` | Turn pin connections into a `.ioc` draft: suggested signal, confidence and candidates per pin, input/output hints for plain GPIO nets, plus a software-emulation fallback with its cost when no hardware function fits; read-only, never writes `.ioc` |
 
-Scope is KiCad 10 (`version 20260306`). Symbol libraries are embedded in the sheets, so KiCad does not need to be installed and `sym-lib-table` is not read; only sheets referenced from the root sheet are parsed, and `.history/` plus other historical versions are ignored. Reconciliation is based on connectivity: pads on one PCB net must belong to one schematic net, and name differences are reported as hints only. The tools are read-only: the schematic and the project configuration are never modified. A draft from `stm32_sch_to_ioc` only lands on disk through `stm32_ioc_plan`, and pins that match no library signal are listed for confirmation.
+Scope is KiCad 10 (`version 20260306`). Symbol libraries are embedded in the sheets, so KiCad does not need to be installed and `sym-lib-table` is not read; only sheets referenced from the root sheet are parsed, and `.history/` plus other historical versions are ignored. Reconciliation is based on connectivity: pads on one PCB net must belong to one schematic net, and name differences are reported as hints only. The tools are read-only: the schematic and the project configuration are never modified. A draft from `ecad_sch_to_ioc` only lands on disk through `stm32_ioc_plan`, and pins that match no library signal are listed for confirmation.
 
 ### Circuit design (tscircuit + KiCad)
 
@@ -195,17 +195,17 @@ Write circuits under `hardware/` with tscircuit, export a real KiCad project, th
 | Tool | Purpose |
 | --- | --- |
 | `stm32_ecad_init` | Create `hardware/{circuit,kicad,libs,out}` with a minimal `package.json`; dependencies come from the shared runtime (see below), not one copy per project |
-| `stm32_sch_review` | One-shot schematic review: read, rule check, `.ioc` draft and the pins that need a human decision; read-only |
+| `ecad_sch_review` | One-shot schematic review: read, rule check, `.ioc` draft and the pins that need a human decision; read-only |
 | `stm32_ecad_design` | One-shot design: build → merge pads (optional) → export libs → ERC/DRC → manufacturability and cost → STEP and fabrication files, reported step by step; pass `pcb=true` to autoroute after lib export (needs KiCadRoutingTools, skipped when missing) |
 | `stm32_ecad_build` | Run `tsci build` with KiCad's bundled bun: `.circuit.tsx` → `circuit.json`, SVGs and `kicad/*.kicad_sch|.kicad_pcb`; with `footprint="kicad:…"` it also renames generated `tscircuit:` names back to the real library and copies the official footprints into `hardware/libs`; JLC footprints (`footprint="jlcpcb:C…"`) are vendored into the library per reference and recorded in `libs/sources.json`; before building it pre-checks the footprint for coincident pads (the A1/B12 pair of a 16P USB-C), and when found it skips autorouting and ignores the placement-clearance warning while still producing the board; pass `mergePads=true` to merge coincident same-net pads into one multi-number pad |
 | `stm32_ecad_check` | Export the project libraries first, then run `kicad-cli sch erc` and `pcb drc`, collapsing violations into rule, severity and affected items; unnamed nets are reported too |
 | `stm32_ecad_libs` | Extract embedded footprints and symbols into real libraries under `hardware/libs` and fill in `fp-lib-table` / `sym-lib-table` |
 | `stm32_ecad_step` | Export STEP into `hardware/out`; resolves models through official 3D dir → `hardware/libs/3d` → cache and rewrites their paths; missing models are reported, not fatal |
 | `stm32_ecad_export` | Export Gerbers, drill files, pick-and-place coordinates and STEP into `hardware/out` in one go |
-| `stm32_ds_fetch` | Fetch non-STM32 datasheets into the local cache: by LCSC code, for every part used by the project, or from a manually imported PDF |
-| `stm32_ds_lookup` | Look up a cached datasheet by purpose: pinout, absolute maximum ratings, electrical characteristics, timing, package — page number, heading and the start of that page |
-| `stm32_ds_list` | List the local datasheet cache: code, MPN, size, fetch time and source |
-| `stm32_pdf_read` | Read a PDF: `info` for page count and text layer, `text` for page text (layout preserved), `figures` to list figures, `table` to cut parameter tables into rows and columns, `render` to rasterise a page or region into PNG for visual reading, `curve` to digitize a curve figure into an auditable (x, y) series |
+| `ecad_ds_fetch` | Fetch non-STM32 datasheets into the local cache: by LCSC code, for every part used by the project, or from a manually imported PDF |
+| `ecad_ds_lookup` | Look up a cached datasheet by purpose: pinout, absolute maximum ratings, electrical characteristics, timing, package — page number, heading and the start of that page |
+| `ecad_ds_list` | List the local datasheet cache: code, MPN, size, fetch time and source |
+| `ecad_pdf_read` | Read a PDF: `info` for page count and text layer, `text` for page text (layout preserved), `figures` to list figures, `table` to cut parameter tables into rows and columns, `render` to rasterise a page or region into PNG for visual reading, `curve` to digitize a curve figure into an auditable (x, y) series |
 | `stm32_pcb_place` | Plan component placement from `circuit.json` and move the footprints in `.kicad_pcb` (drops stale tracks by default, keeps a `.bak`) |
 | `stm32_pcb_autoroute` | Route with KiCadRoutingTools (Rust grid router): planes, fanout, then routing; reports open nets. Dry-run by default |
 | `stm32_pcb_render` | Draw a `.kicad_pcb` as an SVG board view: outline, top and bottom copper, pads, vias, silkscreen; returns size and counts unless `saveAs` is given |
@@ -223,7 +223,7 @@ Write circuits under `hardware/` with tscircuit, export a real KiCad project, th
 | `stm32_sch_draw` | Schematic hand layer: `wire` between pins or points, `label` nets, `clone` a part with a new reference, `place` a new part from a symbol library (embeds `lib_symbols`), `move`/`remove`; writes `hardware/schematic/*.kicad_sch` (never touched by builds) with no KiCad process required, then validates with `kicad-cli sch export netlist` |
 | `stm32_part_import` | Part import: copy a footprint from the KiCad libraries by `Lib:Name`; when it is missing and an LCSC code is given, convert the EasyEDA package from the LCSC page into a `.kicad_mod` (`source=kicad` forces library-only). Generates a symbol skeleton from pad numbers, copies the footprint's referenced 3D model into `hardware/libs/3d` and rewrites it as a `${KIPRJMOD}` relative path, records the LCSC part as footprint properties (`LCSC`/`MPN`/`Brand`/`Datasheet`), and registers `fp-lib-table`/`sym-lib-table` |
 | `stm32_symbol_footprint` | Symbol and footprint generation: emit `.kicad_sym` from a pin list and `.kicad_mod` from package dimensions (QFP / SOIC / two-pad parts); dimensions and pin numbers must be supplied, missing one is an error |
-| `stm32_part_search` | Part search: look up LCSC codes, stock, price ladders and datasheet links by MPN, parameters or code; results cached 24 h, package field left blank when the API omits it |
+| `ecad_part_search` | Part search: look up LCSC codes, stock, price ladders and datasheet links by MPN, parameters or code; results cached 24 h, package field left blank when the API omits it |
 | `stm32_mech` | Enclosure and mechanical constraints: outline size, mounting-hole coordinates and drills, minimum hole-to-edge distance, board area; `export` writes a DXF (R12, outline + mounting holes) for mechanical tools |
 | `stm32_pcb_ipc` | Local edits inside the **open KiCad PCB editor**: board status, move a footprint by reference, draw a track, add a via, refill zones, save. Uses KiCad's official IPC, so edits land in its undo stack. Plan-only by default; `apply: true` plus `expectBoard` to change the board. When nothing is open it launches pcbnew with this project's board and waits (`open: false` to disable) |
 | `stm32_pcb_route` | Grid A* routing (0.5 mm grid) that avoids pads and existing tracks; preview by default, writes only with `apply: true` (run DRC after) |
@@ -285,7 +285,7 @@ The full implementation ships in `templates/`; channel count and ring size are c
 
 ## PDF reading and the datasheet cache
 
-`stm32_pdf_read` needs poppler (`pdftotext` / `pdfinfo` / `pdftoppm`):
+`ecad_pdf_read` needs poppler (`pdftotext` / `pdfinfo` / `pdftoppm`):
 
 ```
 pacman -S --needed mingw-w64-ucrt-x86_64-poppler
@@ -297,16 +297,16 @@ Charts are read as images: shape and order of magnitude (about ±0.5 of a minor 
 
 Non-STM32 parts are fetched once and cached:
 
-- `stm32_ds_fetch code=C25137` fetches by LCSC code; `all=true` fetches every `jlcpcb:` part the project uses; `file=` imports a PDF by hand.
+- `ecad_ds_fetch code=C25137` fetches by LCSC code; `all=true` fetches every `jlcpcb:` part the project uses; `file=` imports a PDF by hand.
 - Cache: `~/.dsh-stm32/datasheets/<code>/` (`meta.json` plus a PDF named after its content sha256); `DSH_STM32_DATASHEETS` relocates it. Cache hits make **no network calls**; failures are remembered for 24 hours and `refresh=true` retries.
 - `stm32_ecad_build` fetches the datasheets the project uses after a successful build; the Circuit design tab shows `datasheets 2/3` in its header and the same logic behind its "fetch datasheets" button.
 - A 16P USB-C footprint splits one piece of copper into two pads (A1/B12); the autorouter cannot pick a unique pad and drops the whole board. When the pre-check finds such a pair, the build skips routing and ignores the placement-clearance warning, leaving routing to KiCad.
-- `stm32_ds_lookup code=C25137 kind=electrical` jumps to the electrical characteristics page: the first 40 pages are indexed once (page numbers only), then text is read per page.
-- `stm32_ds_list` shows what is cached and how much space it takes.
-- The datasheet pin table can back `stm32_sch_to_ioc`: pass `datasheet=C25137` and pins whose signals are missing from the CubeMX database get candidates from the "Pin name / Alternate functions" columns, marked `(datasheet)`.
-- Cache cleanup: `stm32_ds_list remove=C25137` or `olderThanDays=180` reports what was deleted and how many bytes were freed; the panel shows "handbooks x/y (N.N MB)" read-only, deletion stays in the tool.
-- Curves do not have to be eyeballed: `stm32_pdf_read file=DS14721.pdf mode=curve page=44` groups pixels by hue, calibrates a linear mapping from the axis ticks and returns an (x, y) series; legend text is not decoded, so series are named by hue.
-- Afterwards `stm32_pdf_read file=C25137` (or the MPN) reads the cached copy directly, so pinout, limits and timing come from the document.
+- `ecad_ds_lookup code=C25137 kind=electrical` jumps to the electrical characteristics page: the first 40 pages are indexed once (page numbers only), then text is read per page.
+- `ecad_ds_list` shows what is cached and how much space it takes.
+- The datasheet pin table can back `ecad_sch_to_ioc`: pass `datasheet=C25137` and pins whose signals are missing from the CubeMX database get candidates from the "Pin name / Alternate functions" columns, marked `(datasheet)`.
+- Cache cleanup: `ecad_ds_list remove=C25137` or `olderThanDays=180` reports what was deleted and how many bytes were freed; the panel shows "handbooks x/y (N.N MB)" read-only, deletion stays in the tool.
+- Curves do not have to be eyeballed: `ecad_pdf_read file=DS14721.pdf mode=curve page=44` groups pixels by hue, calibrates a linear mapping from the axis ticks and returns an (x, y) series; legend text is not decoded, so series are named by hue.
+- Afterwards `ecad_pdf_read file=C25137` (or the MPN) reads the cached copy directly, so pinout, limits and timing come from the document.
 
 ## Slash commands
 
@@ -338,7 +338,7 @@ The in-session debug console shows one timeline for both sides: the start, succe
 | Artifacts | elf / hex / bin, size, checksum, capacity, build-to-build comparison | Copy checksums |
 | Changes | `.ioc` differences against a baseline | Record a baseline, restore one key, restore all |
 
-Project directories are resolved by convention, and the locations can be set explicitly: firmware lives in `program/`, `firmware/`, `app/`, `user/`, `fw/`, `code/`, or the project root; when none of them match, `*.ioc` is scanned two levels deep and its parent directory becomes the firmware directory (the name is yours to choose); the KiCad project lives in `hardware/`, `kicad/`, `hw/`, or `pcb/` (otherwise `*.kicad_pro` is scanned); configuration and baselines stay in `.dsh-stm32/` at the project root. Both locations can be written to `dsh-stm32.conf` (`firmware=` / `hardware=`), and an `ioc=` entry wins over all conventions. The workspace index always lives in `<workspace>/.dsh-stm32/workspace.conf` and the project description in the project root; `stm32_layout_fix` moves misplaced files (backing them up first).
+Project directories are resolved by convention, and the locations can be set explicitly: firmware lives in `program/`, `firmware/`, `app/`, `user/`, `fw/`, `code/`, or the project root; when none of them match, `*.ioc` is scanned two levels deep and its parent directory becomes the firmware directory (the name is yours to choose); the KiCad project lives in `hardware/`, `kicad/`, `hw/`, or `pcb/` (otherwise `*.kicad_pro` is scanned); configuration and baselines stay in `.dsh-stm32/` at the project root. Both locations can be written to `dsh-stm32.conf` (`firmware=` / `hardware=`), and an `ioc=` entry wins over all conventions. The workspace index always lives in `<workspace>/.dsh-stm32/workspace.conf` and the project description in the project root; `ecad_layout_fix` moves misplaced files (backing them up first).
 
 Opening the panel first loads the most recent records for the session, then appends live. Events are written every 30 seconds to `~/.dsh-stm32/evidence/<date>/<session>/` for replay and export, retained for 7 days and the last 20 sessions by default, all configurable. The panel shows only this plugin's own tool calls. The panel shows only this session's project and debug session: in a session from another workspace, the panel stays empty instead of borrowing another session's project or debug output.
 

@@ -155,7 +155,7 @@ pnpm add "link:D:\path\to\dsh-stm32"
 | `stm32_cache` | 查看、校验、拉取、清理下载缓存（寄存器版 CMSIS 模板） |
 | `stm32_project_create` | 建工程：`route:"hal"` 用模板 + 固件包，`route:"register"` 建不依赖 CubeMX 的寄存器工程；两条路线均生成 `openocd.cfg` |
 | `stm32_project_export` | 工程打包为 zip，默认排除 `build/`、`.dsh-stm32/`、`node_modules/`、`.git/`，可附编译产物 |
-| `stm32_layout_fix` | 检查并把配置文件归位：工作区索引在 `<工作区>/.dsh-stm32/workspace.conf`、工程描述在工程根；默认只报计划，`apply=true` 才改文件（先备份 `.bak`） |
+| `ecad_layout_fix` | 检查并把配置文件归位：工作区索引在 `<工作区>/.dsh-stm32/workspace.conf`、工程描述在工程根；默认只报计划，`apply=true` 才改文件（先备份 `.bak`） |
 
 ### `.ioc`：查看与修改
 
@@ -181,12 +181,12 @@ pnpm add "link:D:\path\to\dsh-stm32"
 
 | 工具 | 用途 |
 | --- | --- |
-| `stm32_sch_read` | 只读解析 KiCad 工程：图纸树、元件、网络、电源网络，以及模块框图（哪两块电路相连、走什么总线） |
-| `stm32_sch_pins` | 主控引脚矩阵：每个脚的网络名、类型、是否悬空，并按 CubeMX 数据库给出可复用信号候选 |
-| `stm32_sch_check` | 检查原理图本身，并与 `.ioc`、`.kicad_pcb` 对账：缺值、缺封装、SWD / BOOT0 / 电源缺失、网络被拆开 |
-| `stm32_sch_to_ioc` | 把引脚连接转成 `.ioc` 配置草案：每个脚给出建议信号、置信度与候选，纯 GPIO 网络给输入/输出建议；硬件复用对不上时给软件模拟退路与代价；只读，不写 `.ioc` |
+| `ecad_sch_read` | 只读解析 KiCad 工程：图纸树、元件、网络、电源网络，以及模块框图（哪两块电路相连、走什么总线） |
+| `ecad_sch_pins` | 主控引脚矩阵：每个脚的网络名、类型、是否悬空，并按 CubeMX 数据库给出可复用信号候选 |
+| `ecad_sch_check` | 检查原理图本身，并与 `.ioc`、`.kicad_pcb` 对账：缺值、缺封装、SWD / BOOT0 / 电源缺失、网络被拆开 |
+| `ecad_sch_to_ioc` | 把引脚连接转成 `.ioc` 配置草案：每个脚给出建议信号、置信度与候选，纯 GPIO 网络给输入/输出建议；硬件复用对不上时给软件模拟退路与代价；只读，不写 `.ioc` |
 
-版本范围是 KiCad 10（`version 20260306`）。元件库内嵌在图纸里，不要求安装 KiCad，也不读 `sym-lib-table`；只跟随根图纸引用到的子图，`.history/` 与其他历史版本不参与解析。对账判据是连通性：同一 PCB 网络上的焊盘，在原理图里必须属于同一网络；名字不一致只作提示。工具只读，不改原理图，也不改工程配置；`stm32_sch_to_ioc` 的草案要交给 `stm32_ioc_plan` 才落盘，且对不上库信号的脚会列在待确认里。
+版本范围是 KiCad 10（`version 20260306`）。元件库内嵌在图纸里，不要求安装 KiCad，也不读 `sym-lib-table`；只跟随根图纸引用到的子图，`.history/` 与其他历史版本不参与解析。对账判据是连通性：同一 PCB 网络上的焊盘，在原理图里必须属于同一网络；名字不一致只作提示。工具只读，不改原理图，也不改工程配置；`ecad_sch_to_ioc` 的草案要交给 `stm32_ioc_plan` 才落盘，且对不上库信号的脚会列在待确认里。
 
 ### 电路设计（tscircuit + KiCad）
 
@@ -195,17 +195,17 @@ pnpm add "link:D:\path\to\dsh-stm32"
 | 工具 | 用途 |
 | --- | --- |
 | `stm32_ecad_init` | 建 `hardware/{circuit,kicad,libs,out}` 与最小 `package.json`；依赖走共享运行时（见下），不再每工程各装一份 |
-| `stm32_sch_review` | 原理图一键评审：读图、规则检查、配置草案与「需要人决策的脚」，只给结论不写盘 |
+| `ecad_sch_review` | 原理图一键评审：读图、规则检查、配置草案与「需要人决策的脚」，只给结论不写盘 |
 | `stm32_ecad_design` | 一键设计：构建 → 合并焊盘（可选）→ 导库 → ERC/DRC → 可制造性与成本 → STEP 与制造文件，逐步报告；传 `pcb=true` 会在导库后自动布线（需预装 KiCadRoutingTools，缺引擎则跳过该步） |
 | `stm32_ecad_build` | 用 KiCad 自带的 bun 跑 `tsci build`：`.circuit.tsx` → `circuit.json`、SVG 与 `kicad/*.kicad_sch|.kicad_pcb`；并把 `tscircuit:` 生成名换回真库名（`footprint="kicad:…"` 时），官方封装复制进 `hardware/libs`；立创封装（`footprint="jlcpcb:C…"`）按位号固化进库并记在 `libs/sources.json`；构建前预检封装里同坐标的焊盘（USB-C 16P 的 A1/B12 这类），命中就跳过自动布线并忽略摆放间距告警，板子照常产出；需要把同坐标焊盘并成一个时，构建时传 `mergePads=true` |
 | `stm32_ecad_check` | 先补齐工程库表与嘉立创工艺规则（`<工程>.kicad_dru`），再跑 `kicad-cli sch erc` 与 `pcb drc`，把违规收敛成规则、级别与涉及项清单；顺带报出未命名网络、板子尺寸、最细走线、最小孔径与打样成本 |
 | `stm32_ecad_libs` | 把生成工程里内嵌的封装/符号抽成 `hardware/libs` 下的真库，并补齐 `fp-lib-table` / `sym-lib-table` |
 | `stm32_ecad_step` | 导出 STEP 到 `hardware/out`；先按「官方 3D 目录 → `hardware/libs/3d` → 缓存」解析模型并改写路径，缺模型只报告，不阻断导出 |
 | `stm32_ecad_export` | 一次导出 Gerber、钻孔、贴片坐标与 STEP 到 `hardware/out`，按最小可下单集合汇总 |
-| `stm32_ds_fetch` | 把非 STM32 器件的数据手册抓到本地缓存：按立创编号、按本工程用到的器件，或手工导入 PDF |
-| `stm32_ds_lookup` | 按用途查手册：引脚、绝对最大额定值、电气特性、时序、封装——给页号、标题与该页开头正文 |
-| `stm32_ds_list` | 列出本地手册缓存：编号、型号、占用、抓取时间与来源 |
-| `stm32_pdf_read` | 读 PDF：`info` 看页数与文字层、`text` 取指定页文字（保版面，表格可读）、`figures` 列图与表、`table` 把参数表切成行列、`render` 把页面或局部渲染成 PNG 交给视觉读图、`curve` 把曲线图数字化成可复核的 (x, y) 序列、`schematic` 列原理图的元件与网络标签（只给清单，不出网表） |
+| `ecad_ds_fetch` | 把非 STM32 器件的数据手册抓到本地缓存：按立创编号、按本工程用到的器件，或手工导入 PDF |
+| `ecad_ds_lookup` | 按用途查手册：引脚、绝对最大额定值、电气特性、时序、封装——给页号、标题与该页开头正文 |
+| `ecad_ds_list` | 列出本地手册缓存：编号、型号、占用、抓取时间与来源 |
+| `ecad_pdf_read` | 读 PDF：`info` 看页数与文字层、`text` 取指定页文字（保版面，表格可读）、`figures` 列图与表、`table` 把参数表切成行列、`render` 把页面或局部渲染成 PNG 交给视觉读图、`curve` 把曲线图数字化成可复核的 (x, y) 序列、`schematic` 列原理图的元件与网络标签（只给清单，不出网表） |
 | `stm32_pcb_place` | 按 circuit.json 的元件与网络计算落位，再改 `.kicad_pcb` 把元件搬到位（默认清掉旧走线，写盘前留 `.bak`）|
 | `stm32_pcb_autoroute` | 用 KiCadRoutingTools（Rust 网格布线器）铺平面、扇出并布线，回报未连接数；默认只出计划 |
 | `stm32_pcb_render` | 把 `.kicad_pcb` 画成 SVG 板图：板框、顶层与底层走线、焊盘、过孔、丝印；默认只回尺寸与计数，给 `saveAs` 才落盘 |
@@ -226,7 +226,7 @@ pnpm add "link:D:\path\to\dsh-stm32"
 | `stm32_sch_draw` | 图纸手绘层：`wire` 连两脚、`label` 标名、`clone` 复制元件、`place` 从符号库放新器件（内嵌 `lib_symbols`）、`move`/`remove`；写 `hardware/schematic/*.kicad_sch`（构建不碰），不需要打开 KiCad，写完用 `kicad-cli` 导网表校验 |
 | `stm32_part_import` | 器件导入：按 `Lib:Name` 从 KiCad 官方库复制封装；库里没有且给了立创编号时，从立创页面取封装图形转成 `.kicad_mod`（`source=kicad` 可强制只查库）。按焊盘号生成符号骨架，立创编号写成封装属性（`LCSC`/`MPN`/`Brand`/`Datasheet`），封装引用的 3D 模型一并收进 `hardware/libs/3d` 并改写为 `${KIPRJMOD}` 相对路径，再登记 `fp-lib-table`/`sym-lib-table` |
 | `stm32_symbol_footprint` | 符号与封装生成：按引脚表出 `.kicad_sym`，按封装尺寸出 `.kicad_mod`（QFP / SOIC / 两脚小件）；尺寸与引脚号必须由调用方给出，缺一个就报错 |
-| `stm32_part_search` | 器件搜索：按型号、参数或立创编号查编号、库存、阶梯价与手册地址；结果缓存 24 小时，封装字段接口不给时留空 |
+| `ecad_part_search` | 器件搜索：按型号、参数或立创编号查编号、库存、阶梯价与手册地址；结果缓存 24 小时，封装字段接口不给时留空 |
 | `stm32_mech` | 外壳与机械约束：板框尺寸、定位孔坐标与孔径、孔到边最小距离、面积；`export` 写 DXF（R12，外形 + 定位孔）给机械软件 |
 | `stm32_brief` | 生成需求与设计说明的三段骨架：`docs/01-MRD.md`（为什么做）、`02-hardware-PRD.md`（电气指标）、`03-design-brief.md`（按什么做）；主控、时钟、外设、板尺寸、元件成本自动填，需求与验收标准留「待定」不替人编，已有文件默认不覆盖 |
 | `stm32_pcb_ipc` | 在**已打开的 KiCad PCB 编辑器**里做局部编辑：看板况、按位号移元件、布一段线、加过孔、重铺铜、保存；走 KiCad 官方 IPC，改动能被 Ctrl+Z 撤销。默认只回计划，`apply: true` + `expectBoard` 才动板子；连不上时自动用 pcbnew 打开本工程的板子并等就绪（`open: false` 可关） |
@@ -305,16 +305,16 @@ static void rtt_init(void) {
 
 非 STM32 器件（LDO、运放、传感器、接口芯片）第一次用到时，把厂商手册抓下来存本地：
 
-- `stm32_ds_fetch code=C25137` 按立创编号抓；`all=true` 抓本工程 `circuit` 源码里出现的全部 `jlcpcb:` 器件；`file=` 手工导入 PDF（反爬或没有编号时的退路）。
+- `ecad_ds_fetch code=C25137` 按立创编号抓；`all=true` 抓本工程 `circuit` 源码里出现的全部 `jlcpcb:` 器件；`file=` 手工导入 PDF（反爬或没有编号时的退路）。
 - 缓存位置 `~/.dsh-stm32/datasheets/<编号>/`（`meta.json` + 以内容 sha256 命名的 PDF），可用 `DSH_STM32_DATASHEETS` 改目录。命中缓存时**不联网**；抓取失败记 24 小时负缓存，`refresh=true` 可强制重试。
 - `stm32_ecad_build` 成功后会自动补齐本工程用到的手册；面板「电路设计」头部显示「手册 2/3」，缺的标黄，点「补手册」走同一套逻辑。
 - 16P USB-C 这类封装把同一块铜拆成两个脚（A1/B12），自动布线器选不出唯一焊盘会整板放弃；预检命中时构建会跳过布线并忽略摆放间距告警，布线在 KiCad 里手工完成。
-- `stm32_ds_lookup code=C25137 kind=electrical` 直接翻到电气特性那一页：先读前 40 页建一次索引（只记页号），之后按页取正文。
-- `stm32_ds_list` 看已缓存哪几份、占多少空间。
-- 手册的引脚表可兜底 `stm32_sch_to_ioc`：`stm32_sch_to_ioc datasheet=C25137`，器件库没有这个脚的信号时，用手册「Pin name / Alternate functions」两列补候选，结果标 `（手册）`。
-- 缓存清理：`stm32_ds_list remove=C25137` 或 `olderThanDays=180`，返回删了哪些、释放多少字节；面板「手册 x/y（N.N MB）」只读，删除走工具。
-- 曲线图不用靠眼睛估：`stm32_pdf_read file=DS14721.pdf mode=curve page=44` 按色相分出每条曲线，用纵/横刻度做线性标定，返回 (x, y) 序列；图例文字认不出，序列按色相命名。
-- 抓到之后直接 `stm32_pdf_read file=C25137`（或写型号）就能读，不必再给路径——引脚、电气参数、时序都从这里取，不靠记忆编。
+- `ecad_ds_lookup code=C25137 kind=electrical` 直接翻到电气特性那一页：先读前 40 页建一次索引（只记页号），之后按页取正文。
+- `ecad_ds_list` 看已缓存哪几份、占多少空间。
+- 手册的引脚表可兜底 `ecad_sch_to_ioc`：`ecad_sch_to_ioc datasheet=C25137`，器件库没有这个脚的信号时，用手册「Pin name / Alternate functions」两列补候选，结果标 `（手册）`。
+- 缓存清理：`ecad_ds_list remove=C25137` 或 `olderThanDays=180`，返回删了哪些、释放多少字节；面板「手册 x/y（N.N MB）」只读，删除走工具。
+- 曲线图不用靠眼睛估：`ecad_pdf_read file=DS14721.pdf mode=curve page=44` 按色相分出每条曲线，用纵/横刻度做线性标定，返回 (x, y) 序列；图例文字认不出，序列按色相命名。
+- 抓到之后直接 `ecad_pdf_read file=C25137`（或写型号）就能读，不必再给路径——引脚、电气参数、时序都从这里取，不靠记忆编。
 
 ## 斜杠命令
 
@@ -346,7 +346,7 @@ static void rtt_init(void) {
 | 产物 | elf / hex / bin、大小、校验和、容量、两次构建对比 | 复制校验和 |
 | 变更 | `.ioc` 与基线的差异 | 记基线、恢复单键、一次恢复全部 |
 
-工程目录按约定解析，位置可显式指定：程序目录取 `program/`、`firmware/`、`app/`、`user/`、`fw/`、`code/` 或工程根；这些候选都不命中时按深度 2 内扫描 `*.ioc`，命中的父目录就是程序目录（目录名由使用者决定）；KiCad 工程取 `hardware/`、`kicad/`、`hw/`、`pcb/`（都没有时扫描 `*.kicad_pro`）；配置与基线在工程根的 `.dsh-stm32/`。两处位置可写进工程根的 `dsh-stm32.conf`（`firmware=` / `hardware=`），写了 `ioc=` 时以该文件所在的目录为准。工作区索引固定写在 `<工作区>/.dsh-stm32/workspace.conf`，工程描述固定写在工程根，放错时用 `stm32_layout_fix` 一键归位（先备份）。
+工程目录按约定解析，位置可显式指定：程序目录取 `program/`、`firmware/`、`app/`、`user/`、`fw/`、`code/` 或工程根；这些候选都不命中时按深度 2 内扫描 `*.ioc`，命中的父目录就是程序目录（目录名由使用者决定）；KiCad 工程取 `hardware/`、`kicad/`、`hw/`、`pcb/`（都没有时扫描 `*.kicad_pro`）；配置与基线在工程根的 `.dsh-stm32/`。两处位置可写进工程根的 `dsh-stm32.conf`（`firmware=` / `hardware=`），写了 `ioc=` 时以该文件所在的目录为准。工作区索引固定写在 `<工作区>/.dsh-stm32/workspace.conf`，工程描述固定写在工程根，放错时用 `ecad_layout_fix` 一键归位（先备份）。
 
 打开面板会先补齐本会话最近的记录，之后实时追加。事件每 30 秒写入 `~/.dsh-stm32/evidence/<日期>/<会话>/`，可回放、导出；默认保留 7 天、最近 20 个会话，可在配置里调整。面板只展示本插件自己的工具调用，不含其他工具的调用。面板只显示本会话的工程与调试会话：换到另一个工作区的会话时，没有工程就是空面板，不会借用别的会话的工程与调试输出。
 

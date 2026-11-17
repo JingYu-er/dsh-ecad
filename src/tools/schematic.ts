@@ -2,9 +2,9 @@
  * L3：原理图工具 —— 读 KiCad 10 原理图，产出元件/引脚/网络事实，并做检查与对账。
  *
  * 三个工具的分工：
- *   stm32_sch_read  看全貌：图纸树、元件、网络、模块框图（给人和模型同一份事实）
- *   stm32_sch_pins  看主控：每个引脚的当前网络 + CubeMX 里的复用候选（写 .ioc 前先确认）
- *   stm32_sch_check 看问题：原理图自身规则、与 PCB 的连通性对账、与 .ioc 的引脚对照
+ *   ecad_sch_read  看全貌：图纸树、元件、网络、模块框图（给人和模型同一份事实）
+ *   ecad_sch_pins  看主控：每个引脚的当前网络 + CubeMX 里的复用候选（写 .ioc 前先确认）
+ *   ecad_sch_check 看问题：原理图自身规则、与 PCB 的连通性对账、与 .ioc 的引脚对照
  *
  * 只读：不改原理图、不写 `.ioc`。要改配置走 `stm32_ioc_plan` 的事务。
  */
@@ -25,12 +25,12 @@ import type { DshContext, JsonSchema, ToolExec } from "../types.js";
 import { resolveProjectDir } from "./project-dir.js";
 import { resolveProjectLayout } from "../engine/project-layout.js";
 
-export const SCH_READ_TOOL = "stm32_sch_read";
-export const SCH_PINS_TOOL = "stm32_sch_pins";
-export const SCH_CHECK_TOOL = "stm32_sch_check";
-export const SCH_TO_IOC_TOOL = "stm32_sch_to_ioc";
+export const SCH_READ_TOOL = "ecad_sch_read";
+export const SCH_PINS_TOOL = "ecad_sch_pins";
+export const SCH_CHECK_TOOL = "ecad_sch_check";
+export const SCH_TO_IOC_TOOL = "ecad_sch_to_ioc";
 
-export const SCH_REVIEW_TOOL = "stm32_sch_review";
+export const SCH_REVIEW_TOOL = "ecad_sch_review";
 
 /** 一次最多列出多少个元件/网络；超出部分只给计数，避免报告压垮上下文。 */
 const LIST_LIMIT = 200;
@@ -363,7 +363,7 @@ export function registerSchematicTools(ctx: DshContext): void {
   ctx.tools.register({
     name: SCH_READ_TOOL,
     description:
-      "读 KiCad 10 原理图（.kicad_sch，文件版本 20260306）：图纸树、元件与引脚网络、网络表、模块框图（按功能模块聚合：主控、NFC 天线与标签、光检测、供电、调试接口、按键，模块之间按总线类型连线，不逐元件罗列）。只读，不写盘；接 PCB 对账与 .ioc 对照用 stm32_sch_check。",
+      "读 KiCad 10 原理图（.kicad_sch，文件版本 20260306）：图纸树、元件与引脚网络、网络表、模块框图（按功能模块聚合：主控、NFC 天线与标签、光检测、供电、调试接口、按键，模块之间按总线类型连线，不逐元件罗列）。只读，不写盘；接 PCB 对账与 .ioc 对照用 ecad_sch_check。",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -578,7 +578,7 @@ export function registerSchematicTools(ctx: DshContext): void {
         cubeMxRoots: { type: "array", items: { type: "string" }, description: "CubeMX 安装根目录候选；缺省按默认搜索。" },
         datasheet: {
           type: "string",
-          description: "厂商手册的立创编号或型号：器件库缺这个脚的信号时，用手册引脚表兜底；先用 stm32_ds_fetch 缓存。",
+          description: "厂商手册的立创编号或型号：器件库缺这个脚的信号时，用手册引脚表兜底；先用 ecad_ds_fetch 缓存。",
         },
       },
     },
@@ -714,7 +714,7 @@ export function registerSchematicTools(ctx: DshContext): void {
       if (wantDatasheet !== "") {
         const found = resolveDatasheetRef(datasheetCacheDir(), wantDatasheet);
         if (found === null) {
-          notes.push("手册 " + wantDatasheet + " 还没缓存：先 stm32_ds_fetch code=" + wantDatasheet + " 再生成草案。");
+          notes.push("手册 " + wantDatasheet + " 还没缓存：先 ecad_ds_fetch code=" + wantDatasheet + " 再生成草案。");
         } else {
           const poppler = locatePoppler(popplerDirs());
           if (poppler.tools === null) {

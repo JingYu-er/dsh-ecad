@@ -20,7 +20,7 @@ import { extractPdfTables, extractPdfText, listFigures, readPdfCurves, readPdfIn
 import { locatePoppler } from "../engine/pdf/toolchain.js";
 import { datasheetCacheDir, resolveDatasheetRef } from "../engine/datasheet/store.js";
 
-export const PDF_READ_TOOL = "stm32_pdf_read";
+export const PDF_READ_TOOL = "ecad_pdf_read";
 
 const MODES = ["info", "text", "figures", "table", "render", "curve", "schematic"] as const;
 

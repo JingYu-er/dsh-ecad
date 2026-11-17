@@ -9,7 +9,7 @@ import { applyLayoutFix, planLayoutFix } from "../engine/project-repair.js";
 import { resolveProjectDir } from "./project-dir.js";
 import type { ToolExec } from "../types.js";
 
-export const LAYOUT_FIX_TOOL = "stm32_layout_fix";
+export const LAYOUT_FIX_TOOL = "ecad_layout_fix";
 
 const actionSchema: JsonSchema = {
   type: "object",

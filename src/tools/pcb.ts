@@ -1219,7 +1219,7 @@ export function registerPcbTools(ctx: DshContext): void {
   const powerTool: ToolDefinition = {
     name: PCB_POWER_TOOL,
     description:
-      "算电源树电流预算：列出板上每个电源网络（电压从名字认、电流按你填的算）、挂着的元件、最窄走线与按 IPC-2221 需要的宽度，合计功率与输入电流。只合计你填的电流；按名字估的另计，不当需求。器件 IDD 请用 stm32_pdf_read 的 table 模式从手册抽出来再填 currents。",
+      "算电源树电流预算：列出板上每个电源网络（电压从名字认、电流按你填的算）、挂着的元件、最窄走线与按 IPC-2221 需要的宽度，合计功率与输入电流。只合计你填的电流；按名字估的另计，不当需求。器件 IDD 请用 ecad_pdf_read 的 table 模式从手册抽出来再填 currents。",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -1918,7 +1918,7 @@ export function registerPcbTools(ctx: DshContext): void {
   const netgateTool: ToolDefinition = {
     name: PCB_NETGATE_TOOL,
     description:
-      "网表与板子的一致性门禁：对账原理图与 PCB 的网络连通性，并判断板子是不是比图纸旧（改完原理图没更新 PCB 最常见）。一次性对账用 stm32_sch_check；这里是「当前是否同步」的结论与修法。",
+      "网表与板子的一致性门禁：对账原理图与 PCB 的网络连通性，并判断板子是不是比图纸旧（改完原理图没更新 PCB 最常见）。一次性对账用 ecad_sch_check；这里是「当前是否同步」的结论与修法。",
     parameters: {
       type: "object",
       additionalProperties: false,

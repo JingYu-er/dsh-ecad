@@ -168,9 +168,9 @@ test(".ioc 引脚表：只认引脚键，跳过 GPIO_Label / Locked", () => {
   assert.deepEqual(pins.get("PA9"), ["S_USART1_TX"]);
 });
 
-test("工具 stm32_sch_read：只读工具能读夹具并给出主控", async () => {
+test("工具 ecad_sch_read：只读工具能读夹具并给出主控", async () => {
   const tools = makeToolContext(FIXTURE);
-  const tool = tools.get("stm32_sch_read");
+  const tool = tools.get("ecad_sch_read");
   assert.ok(tool !== undefined);
   const value = await tool.execute({ projectDir: FIXTURE }, { signal: new AbortController().signal });
   assert.equal(value.ok, true);
@@ -179,9 +179,9 @@ test("工具 stm32_sch_read：只读工具能读夹具并给出主控", async ()
   assert.ok(value.diagram.links.length > 0);
 });
 
-test("工具 stm32_sch_check：夹具上 0 错误，并对上 PCB", async () => {
+test("工具 ecad_sch_check：夹具上 0 错误，并对上 PCB", async () => {
   const tools = makeToolContext(FIXTURE);
-  const tool = tools.get("stm32_sch_check");
+  const tool = tools.get("ecad_sch_check");
   assert.ok(tool !== undefined);
   const value = await tool.execute({ projectDir: FIXTURE, pcbFile: fixturePath("D_NFC.kicad_pcb") }, { signal: new AbortController().signal });
   assert.equal(value.ok, true);
@@ -193,18 +193,18 @@ test("工具 stm32_sch_check：夹具上 0 错误，并对上 PCB", async () => 
 test("工具参数错误：目录里没有原理图时给人话，不抛栈", async () => {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-sch-empty-"));
   const tools = makeToolContext(empty);
-  const value = await tools.get("stm32_sch_read").execute({ projectDir: empty }, { signal: new AbortController().signal });
+  const value = await tools.get("ecad_sch_read").execute({ projectDir: empty }, { signal: new AbortController().signal });
   assert.equal(value.ok, false);
   assert.match(value.message, /没有 KiCad 原理图|没有 \.kicad_sch/u);
 });
 
-test("工具 stm32_sch_read：没传 projectDir 时按 exec.agent 解析会话工作目录（S93）", async () => {
+test("工具 ecad_sch_read：没传 projectDir 时按 exec.agent 解析会话工作目录（S93）", async () => {
   // 工具必须把宿主传进来的 exec 一路带到 resolveProjectDir：少了它，会话工作目录换不到，
   // 调试台拿不到默认工程，工具会退到插件进程的 cwd（不是用户的工作区）。
   resetSessionAgents();
   const tools = makeToolContext(FIXTURE);
   const agent = { id: "session-abc-123" };
-  const value = await tools.get("stm32_sch_read").execute({}, { signal: new AbortController().signal, agent });
+  const value = await tools.get("ecad_sch_read").execute({}, { signal: new AbortController().signal, agent });
   assert.equal(value.ok, true);
   assert.equal(value.components, 43);
   assert.ok(agentOfSession("session-abc-123") !== undefined, "exec.agent 应登记到会话对照表");

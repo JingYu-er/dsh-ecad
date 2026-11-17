@@ -6,7 +6,7 @@
  * 未知的**不当 0 算**，单列「未填」——预算表里有空格比有假数字安全。
  *
  * 器件自身的 IDD 不在这里猜：那要从数据手册的电气特性表读，随器件而变；
- * 需要时用 `stm32_pdf_read` 的 `table` 模式把 IDD 表抽出来，再填进 `currents`。
+ * 需要时用 `ecad_pdf_read` 的 `table` 模式把 IDD 表抽出来，再填进 `currents`。
  */
 
 import type { CircuitModel } from "./netlist.js";

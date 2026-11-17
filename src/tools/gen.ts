@@ -4,7 +4,7 @@
  *   stm32_symbol_footprint  action=symbol 出 `.kicad_sym`；action=footprint 出 `.kicad_mod`
  *
  * 为什么单独成工具：它不读工程、不依赖 KiCad，只吃「引脚表」或「封装尺寸」这两组数。
- * 数据来自手册（`stm32_pdf_read` 的 table）或人量的尺寸，生成只是排版与坐标算术；
+ * 数据来自手册（`ecad_pdf_read` 的 table）或人量的尺寸，生成只是排版与坐标算术；
  * 尺寸缺一个就报错，不拿型号去猜。
  */
 

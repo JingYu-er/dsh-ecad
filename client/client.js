@@ -2692,7 +2692,7 @@ window.__ModuleLoader__.load({
 
     // 面板上的五个动作与工具一一对应：构建、检查、导出库、导出 STEP、打包制造文件。
     // 请求在服务端同步执行（构建几十秒），面板只显示「执行中」，回来后一次性渲染结果。
-    /** 手册缓存的占用（MB / KB），面板只读展示；清理交给 stm32_ds_list 的 remove/olderThanDays。 */
+    /** 手册缓存的占用（MB / KB），面板只读展示；清理交给 ecad_ds_list 的 remove/olderThanDays。 */
 /**
  * 回合末自动构建的最近一次结果（S136）。
  *
@@ -4258,7 +4258,7 @@ function EcadPanel(props) {
                 ),
               ),
               findings.length > shown.length
-                ? e("div", { key: "more", style: { fontSize: "11px", opacity: 0.6, paddingTop: "4px" } }, "另有 " + String(findings.length - shown.length) + " 条，用 stm32_sch_check 查看全部")
+                ? e("div", { key: "more", style: { fontSize: "11px", opacity: 0.6, paddingTop: "4px" } }, "另有 " + String(findings.length - shown.length) + " 条，用 ecad_sch_check 查看全部")
                 : null,
             ),
           );
