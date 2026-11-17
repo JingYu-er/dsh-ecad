@@ -17,6 +17,8 @@ STM32 硬件侧的 DSH 插件：原理图、PCB、制造文件、成本与体检
 
 两个插件各自拷贝共享核心（KiCad 解析、工程目录约定、工具链定位、原子写），不抽公共包。
 
+设置页里有一节 **电路设计工具链**（只读）：列出 KiCad 安装目录与 `kicad-cli`/`bun`/`python`、tscircuit 共享运行时、KiCadRoutingTools、poppler 与 KiCad IPC（kipy）的就绪状态，缺哪个直接给修法，不安装、不改工程。
+
 ## 能力清单
 
 - **原理图**：解析 KiCad 10 `.kicad_sch`（实例变换、多页、网络），输出 SVG 与网表对账；手绘层可加导线、标名、克隆、挪位、放新器件，改动存成图纸本身而不碰生成目录。
@@ -171,7 +173,7 @@ dsh plugin --profile desktop add dsh-ecad
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 22 套件 / 339 pass（含 tools 契约与 schema 子集守卫）
+node test/run-units.mjs     # 22 套件 / 340 pass（含 tools 契约与 schema 子集守卫）
 npm run test:pack
 npm run test:size           # 需 export npm_config_cache=/tmp/npmcache
 ```

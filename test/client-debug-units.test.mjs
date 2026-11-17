@@ -95,7 +95,7 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
     const debug = registered.find((item) => item.definition.name === "conversation.view");
     assert.ok(settings !== undefined, "设置面板槽位不能丢");
     assert.equal(settings.definition.id, "ecad");
-    assert.equal(settings.definition.label(), "STM32 工具链");
+    assert.equal(settings.definition.label(), "电路设计工具链");
     assert.ok(debug !== undefined, "调试台槽位必须注册");
     assert.equal(debug.definition.id, "ecad-hardware");
     assert.equal(debug.definition.label(), "硬件台");
@@ -114,6 +114,10 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
       if (typeof node.type === "function") return renderText(node.type(Object.assign({}, node.props, { children: node.children })));
       return renderText(node.children);
     };
+    const settingsText = renderText(React.createElement(settings.component));
+    assert.ok(settingsText.includes("电路设计工具链"), "设置页标题要是电路设计工具链：" + settingsText.slice(0, 200));
+    assert.equal(settingsText.includes("STM32 工具链"), false, "设置页里不该再出现 STM32 工具链");
+
     const text = renderText(debug.component({}));
     assert.ok(text.includes("硬件台"), text.slice(0, 200));
     // 时间线与详情合并进「事件」页签（S86）：默认标签是实时通道，用页签名钉住入口。

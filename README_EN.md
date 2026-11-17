@@ -15,6 +15,8 @@ Scope runs from "write a `circuit.tsx`" to "hand out Gerbers and a BOM": parts a
 | Schematic | read-only: parse, pin table, rule check, review, `.ioc` draft | read-write: generate, hand-drawn layer, absorb edits back into the source |
 | Fact file | writes `dsh/mcu.json` (`dsh-mcu/1`) | reads `mcu.json`; `board.json` is the planned reverse channel |
 
+The settings page has a read-only **Circuit design toolchain** section: KiCad (`kicad-cli`/`bun`/`python`), the shared tscircuit runtime, KiCadRoutingTools, poppler and KiCad IPC (`kipy`) readiness, each with the fix for whatever is missing. It never installs anything or edits projects.
+
 Both plugins vendor the shared core (KiCad parsing, project layout, toolchain discovery, atomic writes) instead of depending on a common package.
 
 ## Capabilities
@@ -154,7 +156,7 @@ The `conversation.view` tab "硬件台" (Hardware console) sits next to the firm
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 22 suites / 339 pass (incl. tool contract and schema-subset guards)
+node test/run-units.mjs     # 22 suites / 340 pass (incl. tool contract and schema-subset guards)
 npm run test:pack
 npm run test:size
 ```

@@ -150,8 +150,8 @@ test("handleWebApi：GET /config 返回快照，方法不对 405", async () => {
 
 
 test("WEB_API_PATHS：三十四条路由都在前缀下，且没有重复", () => {
-  assert.equal(WEB_API_PATHS.length, 34);
-  assert.equal(new Set(WEB_API_PATHS).size, 34);
+  assert.equal(WEB_API_PATHS.length, 35);
+  assert.equal(new Set(WEB_API_PATHS).size, 35);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/power"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/brief"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/mech"), true);
@@ -176,6 +176,7 @@ test("WEB_API_PATHS：三十四条路由都在前缀下，且没有重复", () =
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/config"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/events"), true, "调试台的事件流必须有独立路由");
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/status"), true);
+  assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/toolchain"), true, "设置页要读工具链状态，没有这条路由会 404");
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/schematic"), true, "原理图页必须有独立路由");
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/pcb"), true, "板图必须有独立路由，否则 host 直接回 404");
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/ipc"), true, "KiCad IPC 检查也要独立路由");
@@ -272,6 +273,28 @@ test("GET /artifacts：返回 elf 与芯片容量；没有构建目录时 elf �
   });
   assert.equal(bare.status, 200);
   assert.equal(bare.body.artifacts.elf, null);
+});
+
+test("GET /toolchain：五处外部依赖一次查完，KiCad 缺了要给可执行的提示", async () => {
+  const result = await handleWebApi({
+    method: "GET",
+    path: WEB_API_PREFIX + "/toolchain",
+    query: {},
+    deps: { subprocess: fakeSubprocess, env: {} },
+  });
+  assert.equal(result.status, 200);
+  const toolchain = result.body.toolchain;
+  assert.ok(toolchain !== null && typeof toolchain === "object");
+  for (const key of ["kicad", "runtime", "autoroute", "poppler", "ipc"]) {
+    assert.ok(toolchain[key] !== null && typeof toolchain[key] === "object", key + " 必须在回包里");
+  }
+  assert.equal(typeof toolchain.runtime.ready, "boolean");
+  assert.equal(typeof toolchain.autoroute.ready, "boolean");
+  assert.equal(typeof toolchain.poppler.ok, "boolean");
+  assert.equal(typeof toolchain.kicad.ok, "boolean");
+  if (toolchain.kicad.ok === false) {
+    assert.ok(toolchain.kicad.error.includes("KiCad"), "没有 KiCad 时要说明缺什么");
+  }
 });
 
 test("GET /status：返回事件计数、会话键与证据目录", async () => {
@@ -695,7 +718,7 @@ test("registerWebRoutes：host 的 dispatch 表里真的有板图路由（S151 �
   assert.equal(registered.includes(WEB_API_PREFIX + "/schematic/sync"), true, "少了这条，补封装只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/render3d"), true, "少了这条，3D 预览只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/swap"), true, "少了这条，换封装只会看到 404");
-  assert.equal(registered.length, 34);
+  assert.equal(registered.length, 35);
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad"), true);
 });
 
