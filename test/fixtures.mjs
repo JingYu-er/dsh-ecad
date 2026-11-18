@@ -11,10 +11,10 @@ export const FIXTURE_IOC = join(FIXTURE_PROJECT, "demo.ioc");
 export const FIXTURE_SCRATCH_IOC = join(FIXTURES, "scratch.ioc");
 
 /**
- * 夹具资源包根（DSH_STM32_ASSETS 用的那个根）：里面只有一个版本目录 2026.10.31-1，
+ * 夹具资源包根（DSH_ECAD_ASSETS 用的那个根）：里面只有一个版本目录 2026.10.31-1，
  * 带 manifest.json / install.json / device/f1/chips.json（20 颗真实 CPN）。
  * 插件已经不再内置芯片表，设备事实全从这个缓存读，所以**所有**需要型号事实的单测都要
- * 在最前面写 process.env.DSH_STM32_ASSETS = FIXTURE_ASSETS —— 否则会去读开发机真实 home 缓存，
+ * 在最前面写 process.env.DSH_ECAD_ASSETS = FIXTURE_ASSETS —— 否则会去读开发机真实 home 缓存，
  * 测试就不再是离线的了。
  */
 export const FIXTURE_ASSETS = join(FIXTURES, "assets");
@@ -22,7 +22,7 @@ export const FIXTURE_ASSETS = join(FIXTURES, "assets");
 export const FIXTURE_ASSETS_VERSION = "2026.10.31-1";
 
 /** e2e 放临时副本的根目录（默认系统临时目录）。 */
-export const E2E_ROOT = process.env.DSH_STM32_E2E_ROOT ?? tmpdir();
+export const E2E_ROOT = process.env.DSH_ECAD_E2E_ROOT ?? tmpdir();
 
 /** 在 E2E_ROOT 下划一个 <名字> 的临时工作目录。 */
 export function e2eWorkDir(name) {
@@ -30,17 +30,17 @@ export function e2eWorkDir(name) {
 }
 
 /**
- * e2e 要的真实工程目录：环境变量 DSH_STM32_E2E_PROJECT 优先（argv 为 false 时忽略命令行参数），
+ * e2e 要的真实工程目录：环境变量 DSH_ECAD_E2E_PROJECT 优先（argv 为 false 时忽略命令行参数），
  * 否则取命令行第 2 个参数。拿不到就报错——绝不悄悄用夹具（夹具里的 .elf 是占位文件，烧了会浪费一次刷写）。
  */
 export function e2eProject(options = {}) {
   const { argv = true } = options;
-  const fromEnv = process.env.DSH_STM32_E2E_PROJECT;
+  const fromEnv = process.env.DSH_ECAD_E2E_PROJECT;
   const fromArgv = argv ? process.argv[2] : undefined;
   const dir = fromEnv ?? fromArgv;
   const hint =
     "这是需要真工程 / 真板子 / 真 CubeMX 的 e2e，必须指路：\n" +
-    "  PowerShell: $env:DSH_STM32_E2E_PROJECT='D:\\path\\to\\your-project'; node test\\e2e-flash.mjs\n" +
+    "  PowerShell: $env:DSH_ECAD_E2E_PROJECT='D:\\path\\to\\your-project'; node test\\e2e-flash.mjs\n" +
     "  或直接给参数: node test\\e2e-flash.mjs D:\\path\\to\\your-project\n" +
     "工程里要有 openocd.cfg、build\\Debug\\<名字>.elf（先跑一次 stm32_build 或 cmake --preset Debug）。";
   if (dir === undefined || dir === null || dir.trim() === "") throw new Error(hint);

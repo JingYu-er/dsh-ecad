@@ -65,7 +65,7 @@ function head(spec: FootprintSpec, attr: "smd" | "through_hole", descr: string, 
   const lines = [
     '(footprint "' + text(spec.name) + '"',
     "  (version 20241229)",
-    '  (generator "dsh-stm32")',
+    '  (generator "dsh-ecad")',
     '  (layer "F.Cu")',
     "  (descr \"" + text(descr) + "\")",
     "  (attr " + attr + ")",

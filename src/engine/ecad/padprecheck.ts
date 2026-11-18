@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ecadHome } from "../ecad-home.js";
+import { envValue } from "../env-compat.js";
 
 /**
  * 封装焊盘预检（S130）。
@@ -79,7 +80,7 @@ export function coincidentGroups(pads: readonly ModPad[], tolerance = 0.01): str
 
 /** 封装缓存目录：与数据手册缓存并列，落在插件自己的家目录下。 */
 export function footprintCacheDir(env: NodeJS.ProcessEnv = process.env): string {
-  const override = (env["DSH_STM32_FOOTPRINTS"] ?? "").trim();
+  const override = (envValue(env, "FOOTPRINTS") ?? "").trim();
   if (override !== "") return override;
   const home = ecadHome(env);
   return join(home, "kicad-mod-cache");
@@ -105,7 +106,7 @@ async function loadMod(ref: string, options: PrecheckOptions): Promise<string> {
   const url = `https://kicad-mod-cache.tscircuit.com/${ref}.kicad_mod`;
   const response = await fetchImpl(url, {
     signal: options.signal,
-    headers: { "user-agent": "dsh-stm32 footprint precheck" },
+    headers: { "user-agent": "dsh-ecad footprint precheck" },
   });
   if (!response.ok) {
     throw new Error(`取封装失败（HTTP ${response.status}）：${url}`);

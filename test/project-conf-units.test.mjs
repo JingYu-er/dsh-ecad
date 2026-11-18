@@ -43,7 +43,7 @@ test("registerWorkspaceProject：首次写入带表头且用相对路径，重�
   const conf = path.join(root, ".dsh-stm32", "workspace.conf");
   assert.equal(fs.existsSync(conf), true);
   const text = fs.readFileSync(conf, "utf8");
-  assert.match(text, /^# dsh-stm32 工作区索引/m);
+  assert.match(text, /^# 工作区索引/m);
   assert.ok(text.includes("project=demo"), "工程路径应相对工作区根");
   assert.equal(registerWorkspaceProject(root, project), false, "重复登记应返回 false");
   assert.equal((fs.readFileSync(conf, "utf8").match(/^project=/gmu) ?? []).length, 1);

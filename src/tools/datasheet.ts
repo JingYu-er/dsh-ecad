@@ -29,6 +29,7 @@ import { extractPdfText } from "../engine/pdf/reader.js";
 import { popplerDirs } from "./pdf.js";
 import { resolveProjectDir } from "./project-dir.js";
 import type { DshContext, JsonSchema, ToolExec } from "../types.js";
+import { envValue } from "../engine/env-compat.js";
 
 export const DS_FETCH_TOOL = "ecad_ds_fetch";
 export const DS_LIST_TOOL = "ecad_ds_list";
@@ -126,7 +127,7 @@ export function registerDatasheetTools(ctx: DshContext): void {
     ) => {
       const env = process.env;
       const cacheDir = cacheDirOf(env);
-      const offline = (env["DSH_STM32_OFFLINE"] ?? "").trim() === "1";
+      const offline = (envValue(env, "OFFLINE") ?? "").trim() === "1";
       const notes: string[] = [];
       const fetched: DatasheetEntry[] = [];
       const failed: { code: string; error: string }[] = [];
@@ -474,11 +475,11 @@ export function registerDatasheetTools(ctx: DshContext): void {
     ) => {
       const env = process.env;
       const query = typeof args?.query === "string" ? args.query : "";
-      const offline = (env["DSH_STM32_OFFLINE"] ?? "").trim() === "1";
+      const offline = (envValue(env, "OFFLINE") ?? "").trim() === "1";
       if (offline) {
         return {
           ok: false,
-          error: "离线模式（DSH_STM32_OFFLINE=1）下不能搜索：这是联网查询",
+          error: "离线模式（DSH_ECAD_OFFLINE=1）下不能搜索：这是联网查询",
           query,
           keyword: query,
           packageName: "",

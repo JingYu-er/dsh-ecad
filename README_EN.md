@@ -135,11 +135,13 @@ The `conversation.view` tab "硬件台" (Hardware console) sits next to the firm
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DSH_ECAD_HOME` | `~/.dsh-ecad` | user-level dir: runtime, datasheet and price caches, footprint cache, evidence |
-| `DSH_STM32_ECAD_RUNTIME` | `<DSH_ECAD_HOME>/ecad-runtime` | shared tscircuit runtime |
-| `DSH_STM32_ECAD_AUTO_INSTALL` | `ask` | `auto` installs the runtime on first build |
-| `DSH_STM32_OFFLINE` | — | `1` disables network access |
-| `DSH_STM32_FOOTPRINTS` | — | override the footprint cache directory |
+| `DSH_ECAD_ECAD_RUNTIME` | `<DSH_ECAD_HOME>/ecad-runtime` | shared tscircuit runtime |
+| `DSH_ECAD_ECAD_AUTO_INSTALL` | `ask` | `auto` installs the runtime on first build |
+| `DSH_ECAD_OFFLINE` | — | `1` disables network access |
+| `DSH_ECAD_FOOTPRINTS` | — | override the footprint cache directory |
 | `KICAD_PYTHON`, `DSH_KICAD_PYTHON` | bundled KiCad python | interpreter for `pcbnew` and IPC scripts |
+
+The legacy `DSH_STM32_*` names are still read (the new name wins), and `~/.dsh-stm32/config.json` is used when `~/.dsh-ecad/config.json` does not exist.
 
 ## Known limits
 
@@ -156,7 +158,7 @@ The `conversation.view` tab "硬件台" (Hardware console) sits next to the firm
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 22 suites / 285 pass (incl. tool contract and schema-subset guards)
+node test/run-units.mjs     # 22 suites / 279 pass (incl. tool contract and schema-subset guards)
 npm run test:pack
 npm run test:size
 ```

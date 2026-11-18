@@ -152,11 +152,13 @@ dsh plugin --profile desktop add dsh-ecad
 | 环境变量 | 默认 | 作用 |
 | --- | --- | --- |
 | `DSH_ECAD_HOME` | `~/.dsh-ecad` | 用户级目录：运行时、手册与价格缓存、封装缓存、证据 |
-| `DSH_STM32_ECAD_RUNTIME` | `<DSH_ECAD_HOME>/ecad-runtime` | 共享运行时（tscircuit）位置，全机一份 |
-| `DSH_STM32_ECAD_AUTO_INSTALL` | `ask` | `auto` 首次构建时自动装运行时；`off` 不装 |
-| `DSH_STM32_OFFLINE` | — | `1` 时禁止联网（搜索、查价、手册、立创封装） |
-| `DSH_STM32_FOOTPRINTS` | — | 覆盖封装缓存目录 |
+| `DSH_ECAD_ECAD_RUNTIME` | `<DSH_ECAD_HOME>/ecad-runtime` | 共享运行时（tscircuit）位置，全机一份 |
+| `DSH_ECAD_ECAD_AUTO_INSTALL` | `ask` | `auto` 首次构建时自动装运行时；`off` 不装 |
+| `DSH_ECAD_OFFLINE` | — | `1` 时禁止联网（搜索、查价、手册、立创封装） |
+| `DSH_ECAD_FOOTPRINTS` | — | 覆盖封装缓存目录 |
 | `KICAD_PYTHON` / `DSH_KICAD_PYTHON` | KiCad 自带 python | `pcbnew` 与 IPC 脚本解释器 |
+
+拆分前的 `DSH_STM32_*` 旧名仍然认（新名优先）：已经配过旧名的机器不用改。`~/.dsh-ecad/config.json` 不存在时会读旧的 `~/.dsh-stm32/config.json`。
 
 ## 已知限制
 
@@ -173,7 +175,7 @@ dsh plugin --profile desktop add dsh-ecad
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 22 套件 / 285 pass（含 tools 契约与 schema 子集守卫）
+node test/run-units.mjs     # 22 套件 / 279 pass（含 tools 契约与 schema 子集守卫）
 npm run test:pack
 npm run test:size           # 需 export npm_config_cache=/tmp/npmcache
 ```

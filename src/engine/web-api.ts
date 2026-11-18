@@ -91,6 +91,7 @@ import { datasheetStatus, ensureProjectDatasheets } from "./datasheet/auto.js";
 import { krtRoot, krtStatus, krtVersion } from "./ecad/pcb/krt.js";
 import { cacheBytes, datasheetCacheDir } from "./datasheet/store.js";
 import type { SubprocessService } from "../types.js";
+import { envValue } from "./env-compat.js";
 
 /** 面板能看到的四类能力（与 stm32_doctor 同一口径）。 */
 export interface WebCapabilities {
@@ -1073,8 +1074,8 @@ export async function handleWebApi(input: {
     }
     backupBoardFile(plan.boardFile);
     const stamp = String(Date.now());
-    const scriptFile = join(tmpdir(), "dsh-stm32-handsync-" + stamp + ".py");
-    const resultFile = join(tmpdir(), "dsh-stm32-handsync-" + stamp + ".json");
+    const scriptFile = join(tmpdir(), "dsh-ecad-handsync-" + stamp + ".py");
+    const resultFile = join(tmpdir(), "dsh-ecad-handsync-" + stamp + ".json");
     writeFileSync(scriptFile, buildHandSyncScript(plan), "utf8");
     const payload = JSON.stringify({
       boardFile: plan.boardFile,
@@ -1736,7 +1737,7 @@ export async function handleWebApi(input: {
     // 补手册只读 circuit 源码与网络，不需要 KiCad：放在工具链探测之前（S120）。
     if (action === "datasheets") {
       const ds = await ensureProjectDatasheets(projectDir, {
-        offline: (envOf(input.deps)["DSH_STM32_OFFLINE"] ?? "").trim() === "1",
+        offline: (envOf(input.deps)["DSH_ECAD_OFFLINE"] ?? "").trim() === "1",
       });
       const notes = [
         "本工程 " + String(ds.codes.length) + " 个立创器件",
@@ -1960,8 +1961,7 @@ export async function handleWebApi(input: {
         sessionKey: wanted === "" ? eventSessionKey() : wanted,
         evidenceRoot: evidenceRoot(env),
         ringLimit: EVENT_RING_LIMIT,
-        evidenceOverride:
-          typeof env.DSH_STM32_EVIDENCE === "string" && env.DSH_STM32_EVIDENCE.trim() !== "",
+        evidenceOverride: (envValue(env, "EVIDENCE") ?? "").trim() !== "",
         running: listRunning(wanted),
         self: pluginSelfCheck(),
       },

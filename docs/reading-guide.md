@@ -1,7 +1,7 @@
 # dsh-stm32 源码精读指南
 
 > 面向：第一次读这个仓库、并且要改它的人。
-> 规模：110 个 TypeScript 文件约 42.3k 行，外加一个手写的浏览器 bundle（client/client.js，618 行）；第 1–11 章的表与行数保留 D 阶段口径，当前计数见 §13.5。**芯片事实随包内置**：`src/data/device-facts.ts` 读插件包内 `assets/device/f1/chips.json`（`DSH_STM32_ASSETS` 可覆盖；2026-11 从独立资源仓并入插件），2026-10-31 已删掉手写 chip-table.json / f1-ram.generated.ts / 手写容量档表 / 内置引脚表。
+> 规模：110 个 TypeScript 文件约 42.3k 行，外加一个手写的浏览器 bundle（client/client.js，618 行）；第 1–11 章的表与行数保留 D 阶段口径，当前计数见 §13.5。**芯片事实随包内置**：`src/data/device-facts.ts` 读插件包内 `assets/device/f1/chips.json`（`DSH_ECAD_ASSETS` 可覆盖；2026-11 从独立资源仓并入插件），2026-10-31 已删掉手写 chip-table.json / f1-ram.generated.ts / 手写容量档表 / 内置引脚表。
 > 读完这份指南你应该能回答：一次工具调用从宿主进来到 openocd 退出中间经过了谁；哪几条不变量破了一定出事；要改某个功能得动哪几个文件；哪些行为有测试兜着、哪些只能上板子验。
 >
 > 配套文档：docs/development-notes.md（按时间记的决策与被坑记录）、docs/logic-audit.md（历史审计条目）、README.md（用户视角）。
@@ -297,7 +297,7 @@ export function formatFlashReport(report: FlashReport): string[] { ... }  // 5. 
 | 模块 | 职责与关键导出 |
 | --- | --- |
 | fetch.ts（347） | `fetchOne(target, destRoot, options)`：按 URL 列表依次尝试 → 校验内容特征（markers）→ 校验 sha256（有声明时）→ 落到目标路径；`fetchAll` 汇总。失败信息带「期望 / 实际」两个哈希，方便判断是上游挪了内容。**同一源内断点续传**（F3c）：`streamOnce(url, part, startAt, …)` 用 `Range: bytes=N-` 流式写 `.part-<pid>-<seq>`，watchdog 在 `stallMs`（默认 10 s）内判停滞或平均速率 < `minBytesPerSec`（默认 1024）就 abort，返回 `slow: true` 让 `fetchOne` 从已落盘字节续一次；服务器回 200（无视 Range）时截断重写，只有 206 才追加——**换源一律从零开始**（不同源的字节不保证同一份）。**校验失败必须连 `.part` 一起删**（T1 实测抓到的泄漏）：体量 / 网页 / markers / sha256 四道都不通过时走局部 `reject(reason)`——它把失败原因记进 `attempts` 再 `removeQuietly(part)`，否则半成品会长期躺在缓存目录里等着占满磁盘。 |
-| cache.ts（416） | 缓存索引（默认 %LOCALAPPDATA%\dsh-stm32\cache，可用 DSH_STM32_CACHE 覆盖）。`CACHE_INDEX_VERSION`、`readCacheIndex` / `writeCacheIndex`（坏索引先改名 index.json.broken-<ts>；tmp 唯一名 + rename 失败先备份旧索引再重试；`CacheIndexWriteError` 让上层知道是索引写坏了，审计 A2/A12）、`upsertCacheEntry` / `removeCacheEntry` / `findCacheEntry`、`checkCacheEntry`（按 sha256 验证，审计 A38）、`sha256OfFile`、`describeCacheBytes`。 |
+| cache.ts（416） | 缓存索引（默认 %LOCALAPPDATA%\dsh-stm32\cache，可用 DSH_ECAD_CACHE 覆盖）。`CACHE_INDEX_VERSION`、`readCacheIndex` / `writeCacheIndex`（坏索引先改名 index.json.broken-<ts>；tmp 唯一名 + rename 失败先备份旧索引再重试；`CacheIndexWriteError` 让上层知道是索引写坏了，审计 A2/A12）、`upsertCacheEntry` / `removeCacheEntry` / `findCacheEntry`、`checkCacheEntry`（按 sha256 验证，审计 A38）、`sha256OfFile`、`describeCacheBytes`。 |
 | tar.ts（288） | `extractTarGz(archive, destRoot, options)`：解 gzip + tar，路径白名单（`isSafeRelative` 拒反斜杠、冒号、.. 与空段）、类型白名单（`entryKind`：0/空/5 正常，x/g/L/K 元数据，其余跳过并记名，审计 A4）、声明长度超出实际数据判截断整次失败。 |
 | firmware-install.ts（760） | 固件包下载与组装。`firmwareInstallPlan` / `installFirmware` / `planOrInstallFirmware`：选址（`isProtectedSystemDir` 拒绝 Program Files 之类、`orderCubeMxRoots` 把本机存在的排前面、`hasCubeMxExe` 只对真 CubeMX 目录建 dsh-firmware）→ 下载 2 个归档 + 5 个内核头 → `extractTarGz` → `verifyFirmwarePackage` → 写 `installed.json` 记录（`FIRMWARE_RECORD_FILE`）→ `firmwareExtraDirs` 让 generate/scaffold 也能找到非标准落点。 |
 | thirdparty.ts（281） | 生成期间临时停放 CubeMX 的第三方包索引（`PARKED_NAME = "pdsc.dsh-parked"`、`needsThirdpartyPacks`、`parkThirdpartyDb`），有 X-CUBE 包的工程保持原样；`cubeMxUserHome`。 |
@@ -335,7 +335,7 @@ export function formatFlashReport(report: FlashReport): string[] { ... }  // 5. 
 | install-guides.ts | 251 | 安装指引文本：`COMPONENT_INSTALLABILITY`（哪些 pacman 能代装、哪些必须人装）、`cubeMxGuide`、`firmwareGuide`、`guideFor`（用 Map 查而不是 in，避免原型链误判）、`guidesFor`、`guideLines`、`firmwareSizeHint`、`familyPrefix`。 |
 | search-roots.ts | 421 | 见 5.2。 |
 | toolchain-config.ts | 370 | 见 5.2。 |
-| device-facts.ts | 278 | 设备事实读取层（新增）：从插件包内 `assets/device/f1/chips.json` 读（`lib/engine/assets.js` 从包根解析；`DSH_STM32_ASSETS` 可换根目录，外部旧版本仍兼容），按 path+size+mtime 缓存一次。`loadDeviceFacts(env?)` → `{ok,path,version,chips,byCpn,byLineGroup,lines,groupsByLine,error}`、`findChipFact(cpn,env?)`（缺失返回 null）、`requireChipFact(cpn,env?)`（抛 `DeviceFactError`，`code: facts-missing / chip-unknown`）、`deviceFactsSource(env?)`（缓存路径或 `"none"`）。**不抛异常、不退回内置表**：找不到内置文件就把「安装不完整：stm32_assets verify 定位，重装插件」原样交给上层。 |
+| device-facts.ts | 278 | 设备事实读取层（新增）：从插件包内 `assets/device/f1/chips.json` 读（`lib/engine/assets.js` 从包根解析；`DSH_ECAD_ASSETS` 可换根目录，外部旧版本仍兼容），按 path+size+mtime 缓存一次。`loadDeviceFacts(env?)` → `{ok,path,version,chips,byCpn,byLineGroup,lines,groupsByLine,error}`、`findChipFact(cpn,env?)`（缺失返回 null）、`requireChipFact(cpn,env?)`（抛 `DeviceFactError`，`code: facts-missing / chip-unknown`）、`deviceFactsSource(env?)`（缓存路径或 `"none"`）。**不抛异常、不退回内置表**：找不到内置文件就把「安装不完整：stm32_assets verify 定位，重装插件」原样交给上层。 |
 | svd.ts | 837 | SVD 寄存器表（新增，D 阶段）：读插件包内 `assets/device/f1/svd/<line>.json`（`profile=full`）。常量 `SVD_REL_DIR`、`SVD_KNOWN_LINES`（100/101/102/103/105/107）、`SVD_FULL_PROFILE_HINT`（一句能照做的「SVD 只在 profile=full：重装插件」提示）。`loadSvd`（返回 `{device,failure}`，不抛）/ `loadSvdForLine` / `requireSvd` / `svdLineForChip(cpn, env)`（走 device-facts 的 line）、`resolveRegisterRef(ref, line, env)`（`GPIOC.ODR` / `GPIOC->ODR` / `0x4001100C` 三种写法等价，返回 base+offset 之后的地址、size、fields）、`describeAddress`（地址 → 寄存器 + 寄存器内偏移，`exact:false` 表示落在寄存器中间）、`decodeRegisterValue`（置位字段 / 清位 / 未覆盖位）、`formatDecodedFields` / `formatAddress` / `formatOffset`；出错抛 `SvdError`（9 类 code）。兼容「包内 flat `assets/`」与旧的外部 `<root>/<version>/` 两种布局，缓存键 path+size+mtimeMs，`svdCacheStats` / `resetSvdCache` 给单测证明命中不重复读盘。只读：不写盘、不联网、不起进程。 |
 
 ## 7. 关键流程
@@ -701,7 +701,7 @@ build-units、cache-units、cache-gc-units、assets-units、probe-error-units（
 
 约定：
 - 测试 import ../lib/，所以**改 src 必须先 npm run build**（否则测的是旧代码，最容易自欺的地方）。
-- run-units 用 DSH_STM32_NO_CONFIG=1 跑子进程，避免开发机上真实的 ~/.dsh-stm32/config.json 影响断言。
+- run-units 用 DSH_ECAD_NO_CONFIG=1 跑子进程，避免开发机上真实的 ~/.dsh-stm32/config.json 影响断言。
 - 输出解析认四种结尾（node:test spec / tap / 自写 tests N / fail M / inline）；解析不到用例数会标红，而不是默默算 0。
 - 套件退出码非 0 一律算失败，即使它自己打印 fail=0。
 - 加套件必须手改 test/run-units.mjs 的 suites 数组——没有自动发现。
@@ -727,7 +727,7 @@ const fake = {
 | 加一个工具 | src/engine/<域>.ts（逻辑）→ src/tools/<x>.ts（schema + 渲染）→ src/index.ts 注册 | output schema、formatXReport、test/tool-contract-units、schema-guard |
 | 改报告字段 | src/tools/<x>.ts 的 reportSchema + 渲染 | schema-guard 必须有对应断言 |
 | 加芯片族（F4/G0…） | src/data/cmsis-sources.ts（启动文件与宏）、firmware-packages.ts（FIRMWARE_FAMILIES 的仓库名要 curl 核实）、data/chips.ts（引脚存在性交给 deriveChipPinTable 从本机 db 派生）、设备事实（包内 assets/device/<族>/chips.json，由 scripts/assets/build-assets.mjs 生成）、再补一份 clock-f1 那样的时钟上限表（否则寄存器版只能不出 clock_init） | 仓库名不能猜；sha256 逐文件实测并把来源 URL 记进表里（F1 的 14 条就是这么来的） |
-| 加芯片型号（同族容量档） | **插件内置 `assets/device/f1/chips.json`**（`node scripts/assets/build-assets.mjs` 从本机 CubeMX `db/mcu` 展开 CPN 并逐字段对账，manifest 里会列 skipped）→ 插件的 src/data/device-facts.ts 自动读到；再对照 src/engine/hal-chip.ts（渲染启动文件/宏/.ld/.ioc）→ register-template.ts / register-linker.ts / register-clock.ts | 改完随插件发版；若用 `DSH_STM32_ASSETS` 指到外部旧版，以外部为准。三条路都要试：HAL 建工程、寄存器建工程、doctor 一致性 |
+| 加芯片型号（同族容量档） | **插件内置 `assets/device/f1/chips.json`**（`node scripts/assets/build-assets.mjs` 从本机 CubeMX `db/mcu` 展开 CPN 并逐字段对账，manifest 里会列 skipped）→ 插件的 src/data/device-facts.ts 自动读到；再对照 src/engine/hal-chip.ts（渲染启动文件/宏/.ld/.ioc）→ register-template.ts / register-linker.ts / register-clock.ts | 改完随插件发版；若用 `DSH_ECAD_ASSETS` 指到外部旧版，以外部为准。三条路都要试：HAL 建工程、寄存器建工程、doctor 一致性 |
 | 改时钟树 | src/data/clock-f1.ts（PLL 源/分频/外设→总线）→ src/engine/clock-plan.ts（枚举/就近/diff）→ src/tools/ioc-plan.ts（参数与渲染）→ src/engine/register-clock.ts（寄存器版） | clock-units 14 例兜「60→64」「超限一个键都不写」；派生键必须全量重算 |
 | 更新设备事实（芯片表） | **插件内置资源** `node scripts/assets/build-assets.mjs` 重跑 → device/f1/chips.json + manifest.json 一起更新（chipdb 与 memory.json 2026-10-31 已删：前者与 CubeMX 的 db/mcu 重复，后者字段全由 chips.json 派生）；随插件发版一起分发 | 生成物不要手改；插件已经不再内置芯片表（`scripts/gen-chip-table.mjs` 与 chip-table.json 2026-10-31 删除），缺文件时工具会明说重装插件。测试夹具在 `test/fixtures/assets/`，与内置资源同构 |
 | 改工程模板 | templates/scaffold/*，若新增文件同步 scaffold.ts 的 SHARED_TEMPLATE_FILES | scaffold-patch-units 的文件数断言会红 |
@@ -794,7 +794,7 @@ const fake = {
 ### 13.2 阅读顺序
 
 - `src/tools/download.ts`：`stm32_download` 的参数 schema（`component` / `dryRun` / `confirm` / `file` / `outDir` / `openPage` / `timeoutMs`）→ `execute` 的模式判定 → 21 个必填字段的 report → `render` 的中文行。`confirm` 只对 `direct` / `manual` 生效；`file` 只读。
-- `src/engine/download.ts`：`planDownload`（URL 与目标路径）→ `downloadUrlToFile`（fetch + `getReader` + `.part-<pid>-<ts>` + 边写边算哈希 + 校验后 rename）→ `sha256File` → `inspectInstallerFile`。下载根目录的优先级是 `DSH_STM32_DOWNLOADS` > `%LOCALAPPDATA%\dsh-stm32\downloads` > `%USERPROFILE%\AppData\Local\...` > 临时目录。
+- `src/engine/download.ts`：`planDownload`（URL 与目标路径）→ `downloadUrlToFile`（fetch + `getReader` + `.part-<pid>-<ts>` + 边写边算哈希 + 校验后 rename）→ `sha256File` → `inspectInstallerFile`。下载根目录的优先级是 `DSH_ECAD_DOWNLOADS` > `%LOCALAPPDATA%\dsh-stm32\downloads` > `%USERPROFILE%\AppData\Local\...` > 临时目录。
 - `test/download-units.test.mjs`：5 条离线用例——两种计划、下载目录覆盖、本地文件校验、本地 HTTP 直链的下载/缓存/哈希不符清理、工具层三种模式。
 
 ### 13.3 安全边界
@@ -915,7 +915,7 @@ const fake = {
 | 项 | 当前值 |
 | --- | --- |
 | 注册工具 | 42 个（HTTP 路由 35 条） |
-| 源码 | `src/**/*.ts` 114 个文件 |
-| 单测 | 22 个套件 / 285 pass / 0 fail（含工具契约 3 条、宿主 schema 子集 2 条） |
-| 客户端 | `client/client.js` 6797 行（手写，不经 tsc） |
-| 包体 | 636.7 KB / 169 文件 / 解包 2915.8 KB（护栏上限 3906.3 KB） |
+| 源码 | `src/**/*.ts` 115 个文件 |
+| 单测 | 22 个套件 / 279 pass / 0 fail（含工具契约 3 条、宿主 schema 子集 2 条） |
+| 客户端 | `client/client.js` 4872 行（手写，不经 tsc） |
+| 包体 | 603.4 KB / 170 文件 / 解包 2740.8 KB（护栏上限 3906.3 KB） |

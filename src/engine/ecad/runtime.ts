@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import type { SubprocessService } from "../../types.js";
 import { runCapture } from "../subprocess-runner.js";
 import { ecadHome } from "../ecad-home.js";
+import { envValue } from "../env-compat.js";
 
 /** 运行时自描述的版本号：结构变了就加一，读到旧版本按"未就绪"处理。 */
 export const RUNTIME_META_VERSION = 1;
@@ -44,9 +45,9 @@ export interface EnsureRuntimeResult {
   readonly notes: readonly string[];
 }
 
-/** 共享运行时目录：`DSH_STM32_ECAD_RUNTIME` 优先，其次 `DSH_ECAD_HOME`，否则 `~/.dsh-ecad/ecad-runtime`。 */
+/** 共享运行时目录：`DSH_ECAD_ECAD_RUNTIME` 优先，其次 `DSH_ECAD_HOME`，否则 `~/.dsh-ecad/ecad-runtime`。 */
 export function ecadRuntimeDir(env: Record<string, string | undefined> = process.env): string {
-  const explicit = (env["DSH_STM32_ECAD_RUNTIME"] ?? "").trim();
+  const explicit = (envValue(env, "ECAD_RUNTIME") ?? "").trim();
   if (explicit !== "") return explicit;
   return join(ecadHome(env as NodeJS.ProcessEnv), "ecad-runtime");
 }
@@ -107,7 +108,7 @@ export async function ensureEcadRuntime(options: EnsureRuntimeOptions): Promise<
   }
   const installHint =
     "装一次共享运行时（约 730 MB，所有工程共用）：" + npmCommand() + " install --no-audit --no-fund " +
-    RUNTIME_PACKAGES.join(" ") + "（在 " + dir + " 下执行；或把 DSH_STM32_ECAD_AUTO_INSTALL 设为 auto 让插件自己装）";
+    RUNTIME_PACKAGES.join(" ") + "（在 " + dir + " 下执行；或把 DSH_ECAD_ECAD_AUTO_INSTALL 设为 auto 让插件自己装）";
   if (mode === "off" || mode === "ask") {
     return { ok: false, error: "tscircuit 运行时还没安装：" + installHint, dir, installed: false, meta: null, notes };
   }
@@ -116,7 +117,7 @@ export async function ensureEcadRuntime(options: EnsureRuntimeOptions): Promise<
   if (!existsSync(pkgFile)) {
     writeFileSync(
       pkgFile,
-      JSON.stringify({ name: "dsh-stm32-ecad-runtime", private: true, version: "0.0.0" }, null, 2) + "\n",
+      JSON.stringify({ name: "dsh-ecad-ecad-runtime", private: true, version: "0.0.0" }, null, 2) + "\n",
       "utf8",
     );
   }
@@ -227,9 +228,9 @@ export function runtimeBytes(dir: string, limitEntries = 40_000): number {
   return total;
 }
 
-/** 环境变量 `DSH_STM32_ECAD_AUTO_INSTALL`：auto / ask / off，默认 ask。 */
+/** 环境变量 `DSH_ECAD_ECAD_AUTO_INSTALL`：auto / ask / off，默认 ask。 */
 export function runtimeInstallMode(env: Record<string, string | undefined> = process.env): "auto" | "ask" | "off" {
-  const raw = (env["DSH_STM32_ECAD_AUTO_INSTALL"] ?? "").trim().toLowerCase();
+  const raw = (envValue(env, "ECAD_AUTO_INSTALL") ?? "").trim().toLowerCase();
   if (raw === "auto" || raw === "true" || raw === "1") return "auto";
   if (raw === "off" || raw === "false" || raw === "0") return "off";
   return "ask";

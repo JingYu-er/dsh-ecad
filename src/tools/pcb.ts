@@ -219,10 +219,10 @@ export function registerPcbTools(ctx: DshContext): void {
 
       copyFileSync(boardFile, boardFile + ".bak");
       const script = buildApplyScript({ plan, boardFile, keepTracks: args.keepTracks === true });
-      const scriptFile = join(tmpdir(), "dsh-stm32-place-" + String(Date.now()) + ".py");
+      const scriptFile = join(tmpdir(), "dsh-ecad-place-" + String(Date.now()) + ".py");
       writeFileSync(scriptFile, script, "utf8");
       const payload = JSON.stringify({ boardFile, keepTracks: args.keepTracks === true, items: plan.items, board: plan.board });
-      const resultFile = join(tmpdir(), "dsh-stm32-place-" + String(Date.now()) + ".json");
+      const resultFile = join(tmpdir(), "dsh-ecad-place-" + String(Date.now()) + ".json");
       const run = await runCapture(ctx.subprocess, {
         argv: [located.toolchain.python, scriptFile, payload, resultFile],
         cwd: dirname(boardFile),
@@ -313,7 +313,7 @@ export function registerPcbTools(ctx: DshContext): void {
       if (boardFile === "" || !existsSync(boardFile)) return { ...empty, error: "还没有可用的 .kicad_pcb：先跑 stm32_ecad_build 或 stm32_pcb_place" };
 
       const notes: string[] = [];
-      const geometryScript = join(tmpdir(), "dsh-stm32-geo-" + String(Date.now()) + ".py");
+      const geometryScript = join(tmpdir(), "dsh-ecad-geo-" + String(Date.now()) + ".py");
       writeFileSync(geometryScript, buildGeometryScript(boardFile), "utf8");
       const geoRun = await runCapture(ctx.subprocess, {
         argv: [located.toolchain.python, geometryScript],
@@ -339,10 +339,10 @@ export function registerPcbTools(ctx: DshContext): void {
 
       if (args.apply === true && keep.length > 0) {
         copyFileSync(boardFile, boardFile + ".bak");
-        const trackScript = join(tmpdir(), "dsh-stm32-tracks-" + String(Date.now()) + ".py");
+        const trackScript = join(tmpdir(), "dsh-ecad-tracks-" + String(Date.now()) + ".py");
         writeFileSync(trackScript, buildTrackScript(boardFile, keep, false, keepVias), "utf8");
-        const trackResult = join(tmpdir(), "dsh-stm32-tracks-" + String(Date.now()) + ".json");
-        const trackPayload = join(tmpdir(), "dsh-stm32-tracks-" + String(Date.now()) + ".payload.json");
+        const trackResult = join(tmpdir(), "dsh-ecad-tracks-" + String(Date.now()) + ".json");
+        const trackPayload = join(tmpdir(), "dsh-ecad-tracks-" + String(Date.now()) + ".payload.json");
         writeFileSync(trackPayload, JSON.stringify({ boardFile, segments: keep, vias: keepVias, dryRun: false }), "utf8");
         const trackRun = await runCapture(ctx.subprocess, {
           argv: [located.toolchain.python, trackScript, trackPayload, trackResult],
@@ -414,7 +414,7 @@ export function registerPcbTools(ctx: DshContext): void {
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
       const root = krtRoot();
       const status = krtStatus(root);
-      if (!status.ok) return { ...empty, error: status.error + "（可用 DSH_STM32_KRT_ROOT 指定目录）" };
+      if (!status.ok) return { ...empty, error: status.error + "（可用 DSH_ECAD_KRT_ROOT 指定目录）" };
       const located = locateEcadToolchain();
       if (located.toolchain === null) return { ...empty, error: located.error };
 

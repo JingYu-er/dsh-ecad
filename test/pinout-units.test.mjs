@@ -166,7 +166,7 @@ function fakeCubeMxRoot() {
 }
 
 function isolatedEnv(root) {
-  return { STM32_CUBEMX_ROOT: root, STM32_NO_DISCOVER: "1", DSH_STM32_NO_CONFIG: "1" };
+  return { STM32_CUBEMX_ROOT: root, STM32_NO_DISCOVER: "1", DSH_ECAD_NO_CONFIG: "1" };
 }
 
 test("readPinout：有 CubeMX db 时给出封装与物理脚号（S77）", () => {

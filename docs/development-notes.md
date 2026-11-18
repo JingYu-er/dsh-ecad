@@ -395,18 +395,18 @@ node test\e2e-a10q-product-parity.mjs # A10q：同一 .ioc 让 CubeMX 直接生�
 ### 真机 / 真 CubeMX 的 e2e（需要自己指工程）
 
 ```powershell
-$env:DSH_STM32_E2E_PROJECT = 'D:\work\my-stm32'   # 任何能构建的工程：有 openocd.cfg + build\Debug\*.elf
+$env:DSH_ECAD_E2E_PROJECT = 'D:\work\my-stm32'   # 任何能构建的工程：有 openocd.cfg + build\Debug\*.elf
 node test\e2e-flash.mjs                            # 也可把目录当第 1 个参数传
 ```
 
 | 脚本 | 额外需要 |
 | --- | --- |
-| `e2e-build` / `e2e-flash` / `e2e-debug` / `e2e-doctor-regs` / `e2e-session` / `e2e-commands` | 板子 + 探针 + `DSH_STM32_E2E_PROJECT` |
+| `e2e-build` / `e2e-flash` / `e2e-debug` / `e2e-doctor-regs` / `e2e-session` / `e2e-commands` | 板子 + 探针 + `DSH_ECAD_E2E_PROJECT` |
 | `e2e-generate` / `e2e-plan-generate` / `e2e-a10q-product-parity` | 同上 + 本机 CubeMX（`STM32_CUBEMX_ROOT`） |
-| `e2e-scaffold` | 板子 + CubeMX + 工具链；目标目录用参数或 `DSH_STM32_E2E_ROOT` 指定 |
-| `e2e-a5` / `e2e-a6` / `e2e-a7-a12` / `e2e-a8` / `e2e-a9` | 板子 + CubeMX + 工具链 + `DSH_STM32_E2E_PROJECT` |
+| `e2e-scaffold` | 板子 + CubeMX + 工具链；目标目录用参数或 `DSH_ECAD_E2E_ROOT` 指定 |
+| `e2e-a5` / `e2e-a6` / `e2e-a7-a12` / `e2e-a8` / `e2e-a9` | 板子 + CubeMX + 工具链 + `DSH_ECAD_E2E_PROJECT` |
 
-没给 `DSH_STM32_E2E_PROJECT` 也没给参数时，脚本直接报错并打印用法，不会“悄悄用夹具糊过去”——夹具里的 `.elf` 是 4 KB 占位文件，烧了只会白白浪费一次刷写。
+没给 `DSH_ECAD_E2E_PROJECT` 也没给参数时，脚本直接报错并打印用法，不会“悄悄用夹具糊过去”——夹具里的 `.elf` 是 4 KB 占位文件，烧了只会白白浪费一次刷写。
 
 ### 验收结论（A1–A13，2026-10-22 实跑）
 
@@ -466,8 +466,8 @@ git push -u origin main
 
 - `STM32_BIN_DIRS`：工具链目录列表，`;` 分隔；默认 `D:/app/msys64/ucrt64/bin` 优先。
 - `STM32_CUBEMX_ROOT`：CubeMX 安装根目录；默认 `D:/app/STM32CubeMX`。
-- `DSH_STM32_E2E_PROJECT`：真机 e2e 用的工程目录（含 `openocd.cfg` 与 `build\Debug\*.elf`）；也可直接当脚本第 1 个参数传。
-- `DSH_STM32_E2E_ROOT`：e2e 临时副本放哪；默认系统临时目录。
+- `DSH_ECAD_E2E_PROJECT`：真机 e2e 用的工程目录（含 `openocd.cfg` 与 `build\Debug\*.elf`）；也可直接当脚本第 1 个参数传。
+- `DSH_ECAD_E2E_ROOT`：e2e 临时副本放哪；默认系统临时目录。
 
 ## 目录
 
@@ -1174,7 +1174,7 @@ const baseReport = { …, notes: failureNotes, … };
 
 ### 2. 用户级配置（`src/data/toolchain-config.ts`）
 
-配置文件放在 `%USERPROFILE%/.dsh-stm32/config.json`（可用 `DSH_STM32_CONFIG` 指到别处，`DSH_STM32_NO_CONFIG=1` 整体关掉）：
+配置文件放在 `%USERPROFILE%/.dsh-stm32/config.json`（可用 `DSH_ECAD_CONFIG` 指到别处，`DSH_ECAD_NO_CONFIG=1` 整体关掉）：
 
 ```json
 {
@@ -1279,7 +1279,7 @@ blocked 时的 `message` 是一句人话，不是字段堆砌：
 
 - **`stm32_env_install` 有两层 mode**：工具的返回体是宿主卡片形态 `{ mode: "report" | "job", jobId, message, report }`，引擎侧的 `plan` / `install` 在 `report.mode` 里。第一版 schema-guard 断言 `value.mode === "plan"` 直接红（`'report' !== 'plan'`）。断言必须写成 `value.mode !== "job"` + `value.report.mode === "plan"`。
 - **schema-guard 的假 ctx 只有 `tools.register` 和 `get("subprocess")`**：门禁如果插在参数校验之前，一大批「非法参数也能拿到完整失败报告」的既有断言会被门禁文案替代。blocked 报告还必须满足各自的 `output.schema`：`stm32_project_create` 的 `report.firmwareRoot` 不能赋 `undefined`（要干脆不赋），`stm32_debug_session` 的 `session.ok` 必须是 `false`。
-- **`test/run-units.mjs` 必须给子进程 `DSH_STM32_NO_CONFIG=1`**：开发机上真实存在 `~/.dsh-stm32/config.json` 时，`search-roots-units` 里「没给参数就用默认候选」的断言会红。而 `toolchain-units.test.mjs` 顶部自己 `delete process.env.DSH_STM32_NO_CONFIG`——它测的就是配置层。这是个典型的「测试互相污染」，用环境变量在进程边界切开最省事。**二次事故**：真装把 `~/.dsh-stm32/config.json` 写出来之后，`search-roots-units` 里那两条「没给参数就该吃默认候选」的断言直接红了（actual 变成 `D:/app/msys64/ucrt64/bin`）——这几条把 env 当参数**显式传** `{}`，`run-units` 给子进程设的 `DSH_STM32_NO_CONFIG=1` 传不进这个参数。现在该文件顶部有 `cleanEnv(extra)` = `{ DSH_STM32_NO_CONFIG: "1", ...extra }`，四条断言都走它：断言的是「默认层」，就不该让「本机装没装过」参与决定。
+- **`test/run-units.mjs` 必须给子进程 `DSH_ECAD_NO_CONFIG=1`**：开发机上真实存在 `~/.dsh-stm32/config.json` 时，`search-roots-units` 里「没给参数就用默认候选」的断言会红。而 `toolchain-units.test.mjs` 顶部自己 `delete process.env.DSH_ECAD_NO_CONFIG`——它测的就是配置层。这是个典型的「测试互相污染」，用环境变量在进程边界切开最省事。**二次事故**：真装把 `~/.dsh-stm32/config.json` 写出来之后，`search-roots-units` 里那两条「没给参数就该吃默认候选」的断言直接红了（actual 变成 `D:/app/msys64/ucrt64/bin`）——这几条把 env 当参数**显式传** `{}`，`run-units` 给子进程设的 `DSH_ECAD_NO_CONFIG=1` 传不进这个参数。现在该文件顶部有 `cleanEnv(extra)` = `{ DSH_ECAD_NO_CONFIG: "1", ...extra }`，四条断言都走它：断言的是「默认层」，就不该让「本机装没装过」参与决定。
 - **没有 subprocess 也不能只说「没找到」**：门禁在 `subprocess` 缺失时合成 `found: false` 的探测结果，并且把 `error`（`宿主没有提供 subprocess 服务，只能做文件存在性检查`）落进 `missing[].error`。否则用户看到「缺 gcc」，实际是宿主少注入了服务。
 - **工具数/命令数是硬断言**：`test/commands-units.test.mjs` 里有一份命令名数组、`schema-guard` 头注释、README 的「N 个工具 / N 条命令」、`docs/development-notes.md` 的头部说明，新增一个工具要一起改，否则红的是三处不相关的地方。
 
@@ -1287,7 +1287,7 @@ blocked 时的 `message` 是一句人话，不是字段堆砌：
 
 套件 15 → 17，用例 137 → **170 pass / 0 fail**（CI 上是 168 pass + 2 skipped，跳过的仍是那两条需要真固件包的脚手架用例）。新增：
 
-- `test/toolchain-units.test.mjs`（22 例）：配置读写往返（`DSH_STM32_CONFIG` 指到临时目录、反斜杠与大小写重复归并、写完无 `.tmp` 残留）、坏 JSON → `config: null` + errors、`normalize` 丢非法字段、`binDirsFromConfig` 推导、`toolchainConfigPath` 三种优先级、`updateToolchainConfig` 合并、`resolveSearchConfig` 四层优先级；门禁的 `CAPABILITY_COMPONENTS` / `normalizeEnvCheck`、快路径不 spawn、缺件 block 文案与 detail、warn 前缀、off 放行、60 s 缓存 `cacheHit` 与 `resetGateCache`、`generate` 报 `[cubemx, cubemx-java]`、无 subprocess 时 `missing[0].error`；以及引擎/门禁共用的 `resolveToolIn`（显式目录命中就不问宿主、目录没有才回退 PATH、哪都没有返回 null 不抛、老式假 subprocess 不带 `resolveExecutable` 也不炸）；再加大三例（§10）：外来配置的告警透传到 `warnings` / `gateReportNotes`、`buildTargets` 的 pacman 建议按 `binDirs` 推导且全文不出现开发机路径、`resolveTargetDir` 拒绝「盘符都不存在」的配置 msys64。`test/search-roots-units.test.mjs` 9 → 11：内置默认候选不含任何某台机器专属路径、`searchConfigWarnings` 只报不存在的条目（含 `source: "env"` 与存在项不报）。
+- `test/toolchain-units.test.mjs`（22 例）：配置读写往返（`DSH_ECAD_CONFIG` 指到临时目录、反斜杠与大小写重复归并、写完无 `.tmp` 残留）、坏 JSON → `config: null` + errors、`normalize` 丢非法字段、`binDirsFromConfig` 推导、`toolchainConfigPath` 三种优先级、`updateToolchainConfig` 合并、`resolveSearchConfig` 四层优先级；门禁的 `CAPABILITY_COMPONENTS` / `normalizeEnvCheck`、快路径不 spawn、缺件 block 文案与 detail、warn 前缀、off 放行、60 s 缓存 `cacheHit` 与 `resetGateCache`、`generate` 报 `[cubemx, cubemx-java]`、无 subprocess 时 `missing[0].error`；以及引擎/门禁共用的 `resolveToolIn`（显式目录命中就不问宿主、目录没有才回退 PATH、哪都没有返回 null 不抛、老式假 subprocess 不带 `resolveExecutable` 也不炸）；再加大三例（§10）：外来配置的告警透传到 `warnings` / `gateReportNotes`、`buildTargets` 的 pacman 建议按 `binDirs` 推导且全文不出现开发机路径、`resolveTargetDir` 拒绝「盘符都不存在」的配置 msys64。`test/search-roots-units.test.mjs` 9 → 11：内置默认候选不含任何某台机器专属路径、`searchConfigWarnings` 只报不存在的条目（含 `source: "env"` 与存在项不报）。
 - `test/install-units.test.mjs`（6 例，§11 那次真装事故换来的）：`parsePacmanQuery` 只收「包名 版本」行；五包已装时 pacman 步 `skipped` 且一条 `pacman -S` 都没执行（断言 calls 里没有该前缀）、`ok` / `verify.ok` / `config.written` 全 true 且写出的配置 `msys64` 对得上；pacman 失败但自检全过 → 步 `done`、detail 含「已装」与 `pacman -Syu`、`ok` true；依赖解不开且自检失败 → `failed`、detail 含「无法满足依赖关系」与 `-Syu`、`ok` false；工具真装返回 `mode: "job"`、`message` 含「已在后台安装」且不含「还没动手」、`report.notes` 里没有「这只是计划」、job label 含 `stm32_env_install`。假件只实现 `spawn` 的四个成员（`done` / `collected` / `terminate` / `waitForExit`），按命令内容回答，不跑真 pacman。第 6 例盯的是**计划文案与实际执行的偏差**：计划里 pacman 步必须写出「先 `pacman -Q` 问一遍、已装跳过」，且不能再预告一条无条件 `-Sy --noconfirm && pacman -S` 的命令；计划模式除了一次只读的 `reg.exe query HKCU\Environment /v Path`（用来预告「会不会重复写 PATH」）之外不跑任何命令，尤其不跑 pacman。
 - `test/schema-guard.mjs` 17 → 20：`stm32_env_install` 缺开关停在计划（不写 PATH、不开 job）、门禁缺件时 `stm32_build` 返回 schema 齐全的失败报告、`envCheck: "off"` 不被门禁文案替代。
 
@@ -1330,7 +1330,7 @@ blocked 时的 `message` 是一句人话，不是字段堆砌：
   4. 成功判定加一条：`verify.ok` 且 pacman 步失败 → 该步改判 `done` 并附「但自检显示 5 个组件都能跑，按「已装」处理（插件不替你升级，要升级自己跑 pacman -Syu）。」——自检是最终裁判，pacman 的退出码只是过程信息。
   5. 真装卡片文案换成「已在后台安装 MSYS2 到 …：7 步依次跑，进度看 job 输出。」，并过滤掉计划模式专属的那句「这只是计划」，否则用户在 job 里读到"还没动手"会以为没装。
   6. **计划文案与实际执行对齐**：pacman 步原本预告的是 `bash.exe -lc "pacman -Sy --noconfirm && pacman -S …"`——真跑已经不是这条了。改成「先 `pacman -Q <5 个包>` 问一遍装没装，已装的直接跳过（不重复安装、也不升级…）；只对缺的包跑 `pacman -S --noconfirm --needed <缺的包>`；整机一件都没有时才先 `pacman -Sy` 同步一次」。用户是先看计划再决定装不装，计划里的命令必须就是会跑的命令。
-- **验证**：`test/install-units.test.mjs` 6 例（假 `spawn`，按命令内容回答）；修完后再真机跑一次 `stm32_env_install({dryRun:false, confirm:true})`（job `stm32-env-install-7d8c8295473445d7`）：卡片首行「已在后台安装 MSYS2 到 D:/app/msys64（来源：配置里的 msys64）：7 步依次跑，进度看 job 输出。」，job 状态 **completed**，pacman 步 `[--]` 跳过（detail 列出 5 个包与版本）、PATH 步「已经有 D:\app\msys64\ucrt64\bin，没有重复写」、自检 5/5、config 写入，结尾「现在可以编译 / 烧录 / 调试」；再用真 `subprocess` 在本机复跑一次（临时脚本、`DSH_STM32_CONFIG` 指临时文件、`writePath: false`）：pacman 步 `skipped`、detail 列出 5 个包与版本、`ok` true、`verify.ok` true，**全程没有第二条 `pacman -S`**。
+- **验证**：`test/install-units.test.mjs` 6 例（假 `spawn`，按命令内容回答）；修完后再真机跑一次 `stm32_env_install({dryRun:false, confirm:true})`（job `stm32-env-install-7d8c8295473445d7`）：卡片首行「已在后台安装 MSYS2 到 D:/app/msys64（来源：配置里的 msys64）：7 步依次跑，进度看 job 输出。」，job 状态 **completed**，pacman 步 `[--]` 跳过（detail 列出 5 个包与版本）、PATH 步「已经有 D:\app\msys64\ucrt64\bin，没有重复写」、自检 5/5、config 写入，结尾「现在可以编译 / 烧录 / 调试」；再用真 `subprocess` 在本机复跑一次（临时脚本、`DSH_ECAD_CONFIG` 指临时文件、`writePath: false`）：pacman 步 `skipped`、detail 列出 5 个包与版本、`ok` true、`verify.ok` true，**全程没有第二条 `pacman -S`**。
 - **教训**：安装器对"已经装好一部分"的机器最危险——很容易把"再确认一次"写成"再动一遍手"。凡是 pacman / apt / npm install 这类命令，先查状态再决定执行，且默认永不隐式升级。
 
 ### 12. 动手前先选路线：installability 分流 + `stm32_route_plan`
@@ -1353,7 +1353,7 @@ blocked 时的 `message` 是一句人话，不是字段堆砌：
 - **取证一（下载源，本机实测 `curl.exe`）**：`raw.githubusercontent.com/.../stm32f1xx.h` **超时（curl 28）不可用**；`github.com` 206、`api.github.com` 206、`codeload.github.com/.../tar.gz` 200 / 1,086,613 B / 2.8 s；`fastly.jsdelivr.net/gh/...` 206 / 0.94 s；`ghproxy.net/https://raw.githubusercontent.com/...` 206 / 1.9 s。于是 `sourceUrls()` 固定四候选顺序：jsDelivr fastly → jsDelivr cdn → raw.githubusercontent → ghproxy。逐文件用 jsDelivr 核过 10 个文件全 200（`core_cm3.h` 109,913 B、`stm32f103xb.h` 842,883 B、`startup_stm32f103xb.s` 9,725 B 等）。
 - **取证二（ST 上游到底有哪几套文件，直接决定模板清单）**：F1 只有三套，`x8` / `xC` / `xD` 三种写法在 Include 与 startup 目录**全是 404**：`Include/{stm32f103x6.h 832,603 B, stm32f103xb.h 842,883 B, stm32f103xe.h 962,263 B}`、`Source/Templates/gcc/{startup_stm32f103x6.s 9,272 B, startup_stm32f103xb.s 9,725 B, startup_stm32f103xe.s 12,022 B}`。中等容量（C8/CB）归 `xB` 那一组。`F1_STARTUP_BY_DENSITY` 因此是 `{6:x6, 8:xb, B:xb, C/D/E:xe}`，每条直接带 `{startup, define, header}` 三元组，不再拼串。
 - **实现（六个文件）**：
-  1. `src/engine/cache.ts`：缓存根 `DSH_STM32_CACHE`（支持 `~` 展开）> `%LOCALAPPDATA%\dsh-stm32\cache` > `%USERPROFILE%\AppData\Local\...` > `os.tmpdir()/dsh-stm32-cache`；`index.json` 可检索（`CacheEntry{id,kind,family,label,root,createdAt,totalBytes,files,sources,license}`）；`writeCacheIndex` 走 `.tmp` + rename 原子替换；坏 JSON **不抛**——返回空索引 + 一句中文错误（缓存是加速手段，坏了就当没缓存）。
+  1. `src/engine/cache.ts`：缓存根 `DSH_ECAD_CACHE`（支持 `~` 展开）> `%LOCALAPPDATA%\dsh-stm32\cache` > `%USERPROFILE%\AppData\Local\...` > `os.tmpdir()/dsh-stm32-cache`；`index.json` 可检索（`CacheEntry{id,kind,family,label,root,createdAt,totalBytes,files,sources,license}`）；`writeCacheIndex` 走 `.tmp` + rename 原子替换；坏 JSON **不抛**——返回空索引 + 一句中文错误（缓存是加速手段，坏了就当没缓存）。
   2. `src/engine/fetch.ts`：`fetchOne(target, destRoot, {fetchImpl, timeoutMs, signal})` 按 `urls` 顺序试，HTTP 非 2xx / 字节数 < `minBytes`（默认 16）/ 内容前 512 字节像 HTML 都记为该源失败并进 `attempts`；成功走 `.part-<pid>` + rename，不留半截文件；`fetchAll` 并发 3、`onProgress(outcome, done, total)`。**只用全局 `fetch`，零运行时依赖**，测试注入 `fetchImpl`。
   3. `src/data/cmsis-sources.ts`：`CMSIS_FAMILIES` 目前只有 F1（`cmsis-device-f1@master` + `STM32CubeF1@master` 的 CMSIS Core 头 + `core_cm3.h`）；`startupChoiceFor(mcu)` 认 `STM32F103C8T6` 与 `F1:B` 两种写法，**认不出返回 null**（宁可说"这版不支持"，也不编一个文件名）；`cmsisTemplatePlan(choice)` 产出 10 个 `FetchTarget`，落盘路径按 ST 固件包布局（`Drivers/CMSIS/Device/ST/STM32F1xx/...`、`Drivers/CMSIS/Include/...`），每项带自己的 `minBytes`（头 200、`stm32f103xb.h` 10,000、startup 500…）。
   4. `src/engine/register-template.ts`：`ensureCmsisTemplate()` 查缓存 → `checkCacheEntry` 全好即 `cacheHit` → 否则 `fetchAll` → 写 `THIRD_PARTY_NOTICES.md`（Apache-2.0 + 两个 ST 仓库地址 + 「本目录是下载缓存，不是插件源码」）→ `upsertCacheEntry`。下载失败时**把整条缓存条目删掉**（半截缓存比没有缓存更糟）。`createRegisterProject()` 复用 `templates/scaffold` 的四个公共文件（`CMakePresets.json`、`.gitignore`、`STM32F103XX_FLASH.ld`、`cmake/gcc-arm-none-eabi.cmake`），CMSIS 从缓存 `cpSync` 整棵 `Drivers`。
@@ -2152,7 +2152,7 @@ skill 的 R2 现在点名「本型号的启动文件 + 本型号的 `.ld`」，R
 用户原话：「**内置表删了吧**」。这一批把插件里三张手写/生成的事实表全部清掉，改成「资源仓库出事实、插件只读本地缓存」：
 
 - **删文件**：`src/data/chip-table.json`（2016 颗薄表，157 KB）、`src/data/f1-ram.generated.ts`（RAM 反查表）、`scripts/gen-chip-table.mjs`（371 行）。脚本**直接删**而不是保留：生成 CPN 的逻辑已经搬到资源仓库的 `scripts/build-assets.mjs`，插件侧再留一份生成器就等于留两条事实来源。
-- **新增读取层** `src/data/device-facts.ts`：唯一事实来源是 `~/.dsh-stm32/assets/<版本>/device/f1/chips.json`（版本取本地已装最新一版；`DSH_STM32_ASSETS` 可换根目录），按 path+size+mtime 内存缓存一次。`loadDeviceFacts()` / `findChipFact(cpn)`（缺失返回 null）/ `requireChipFact(cpn)`（抛 `DeviceFactError`，code = `facts-missing` / `chip-unknown`）/ `deviceFactsSource()`（缓存路径或 `"none"`）。没有缓存时不抛、不猜，把「先跑 stm32_assets refresh，或检查网络」原样交上去。
+- **新增读取层** `src/data/device-facts.ts`：唯一事实来源是 `~/.dsh-stm32/assets/<版本>/device/f1/chips.json`（版本取本地已装最新一版；`DSH_ECAD_ASSETS` 可换根目录），按 path+size+mtime 内存缓存一次。`loadDeviceFacts()` / `findChipFact(cpn)`（缺失返回 null）/ `requireChipFact(cpn)`（抛 `DeviceFactError`，code = `facts-missing` / `chip-unknown`）/ `deviceFactsSource()`（缓存路径或 `"none"`）。没有缓存时不抛、不猜，把「先跑 stm32_assets refresh，或检查网络」原样交上去。
 - **`src/data/stm32f1.ts`**：删 `F1_LINES` / `GROUP_BY_LETTER` / `FLASH_BY_LETTER` / `RAM_BY_LINE_LETTER` / `PINS_BY_PACKAGE` 与 `f1-ram.generated` 的 import；`resolveF1Chip` 的签名与 `F1Chip` 结构不变，改为「解析写法 → 查 device facts」；`f1GroupsFor(code)` 从事实聚合。错误分四类，都带 refresh 提示。
 - **`src/data/cmsis-sources.ts`**：`F1:B` / `F1:8` 这类只给容量字母的老写法，原来的「字母 → 档位」常量表已删，改成从事实里挑一颗同档芯片当代表（优先 F103），没缓存就返回 null。
 - **`src/data/chips.ts`**：删 `CHIPS` / `KNOWN_CHIPS` / `findChip` / `ChipInfo`。`isKnownPin(pin)` 改成单参、只查**引脚名合法性**（`PA0..PG15`、`VP_*`；`PA0-WKUP` / `PC13-TAMPER-RTC` 先归一化）。没有拿 `pinCount` 去猜封装引脚——那等于又造一张表；引脚存在性只认本机 CubeMX db（`deriveChipPinTable` 的 `kind` 从 `db / builtin / unknown` 收窄成 `db / unknown`，没有 db 就明说「引脚存在性不校验」）。
@@ -2537,7 +2537,7 @@ engine 的 `src/engine/regs.ts` **一行没动**：它仍旧只负责「生成 o
 - `npm run build` → exit 0（typecheck 同）。
 - `node --test test/svd-units.test.mjs` → **39 pass / 0 fail**（26 + 13）。
 - `npm test` → **36 个套件 562 pass / 0 fail**（前 35 套件 523 例 + `svd-units` 39 例，无回归；`run-units.mjs` 里 `svd-units` 排在 `rtt-units` 之后）。
-- 真实资源包实测（`DSH_STM32_ASSETS` 直指资源仓库，line=103，53 外设 / 722 寄存器 / 4833 位域）：
+- 真实资源包实测（`DSH_ECAD_ASSETS` 直指资源仓库，line=103，53 外设 / 722 寄存器 / 4833 位域）：
   - `GPIOC.ODR` → 0x4001100C（基址 0x40011000 + offset 0x0C，16 个位域）；`GPIOC->ODR` 同；`RCC.CR` → 0x40021000（10 个位域）。
   - 反向：`0x4001100C` → `GPIOC.ODR`；`describeAddress(0x4001100E)` → `GPIOC.ODR`、`exact: false`、`offsetInRegister: 2`。
   - 解码：`GPIOC.ODR` 读 0x00000020 → `ODR5=1`；`RCC.CR` 读 0x00000083 → `HSION=1, HSIRDY=1, HSITRIM=16`；读 0 → `fields: []`、无箭头。
@@ -2775,7 +2775,7 @@ CubeMX 的 db 里同一根脚常带后缀（F103C8 的 `PA0` 是 `PA0-WKUP`、`P
 | 没装 CubeMX / db 里没有这颗 | `ioc-presets.ts` 的 `PIN_DB_ALIASES`（离线兜底，只覆盖 F1 6 根脚） | warnings 明确说「只覆盖 F1 的 6 根带后缀的脚，db 里换过名的话会写错脚」 |
 
 搜索范围来自 `resolveSearchConfig(process.env, {})`：`STM32_CUBEMX_ROOT` 指目录、`STM32_NO_DISCOVER=1` 关自动发现、
-`DSH_STM32_NO_CONFIG=1` 不读本机配置（单测就是这么把 db 钉死的）。
+`DSH_ECAD_NO_CONFIG=1` 不读本机配置（单测就是这么把 db 钉死的）。
 
 **顺带纠正一个数错**：`STM32F103C(8-B)Tx.xml` 里有 **48 个 `<Pin>` 标签，但只有 44 个不同名字**——
 `VSS`/`VDD` 各出现 3 次（电源脚在 db 里按球位重复），`parseMcuXml` 早就全部解析到了。
@@ -5218,7 +5218,7 @@ U0  STM32U031C6T6  HSE ÷1 ×28 ÷2    →  56 MHz (VCO 112M)  benign=true  762,
 
 - `resolveFwLibrary(dbRoot, partNumber, fallback)`：按 db 文件名（RefName 簇写法，如 `STM32F103C(8-B)Tx`、`STM32H7R3A8Ix`）转成正则去匹配用户给的型号，命中且带 `FwLibrary` 就用它；否则退回落包名 `STM32Cube_FW_<族>`。
 - URL 规律（实测 HEAD 全部 200）：`https://sw-center.st.com/packs/resource/firmware/stm32cube_fw_<库名后缀小写>_v<版本去点>.zip`，例 `stm32cube_fw_f1_v187.zip`（56,220,914 B）、`stm32cube_fw_wba_v170.zip`（388,603,994 B）。不存在的版本返回 404 + 一个 XML 错误页，所以必须判状态码，不能只看有没有字节。
-- `DSH_STM32_FIRMWARE_BASE` 可把基址换掉（内网镜像/离线测试用）。
+- `DSH_ECAD_FIRMWARE_BASE` 可把基址换掉（内网镜像/离线测试用）。
 
 ### 校验：Content-Length + 逐条 CRC32
 
@@ -5253,7 +5253,7 @@ CubeMX 无头命令行里 `swmgr` 子命令有 `refresh` / `connection` / `insta
 
 - SVD 源：本机 `D:/JingYu/STM32/cmsis-svd-stm32` 的 origin 就是 `github.com/modm-io/cmsis-svd-stm32`；GitHub API 实测 default_branch=main、261★、未归档、pushed_at=2026-07-09。contents API 实测布局 `<族小写>/<线>.svd`（stm32c0 6 份、stm32f1 5 份、stm32l4 16 份、stm32h5 10 份，命名同规则），候选顺序沿用 cmsis-sources 的老结论：fastly jsDelivr → cdn jsDelivr → raw.githubusercontent → ghproxy（前两条 200 实测）。
 - **SVD 不锁 sha256**：同名文件本机快照与 main 已漂移（STM32C031.svd 本地 2,332,557 B / 远端 2,281,605 B，哈希不同）。锁哈希=每次上游 "Update STM32 SVD files" 就全线报错；改锁形状——`minBytes` + markers `<device`/`<cpu>`（真 SVD 必带），实际取到内容算 sha256 **记进 sources**（可追溯、不拦人）。这跟 CMSIS 下载缓存逐文件钉哈希的口径相反，是有意的：那边钉的是版本，这边上游本来就漂。
-- RM 源：`https://www.st.com/resource/en/reference_manual/rm0490-<全标题小写>.pdf` 实测 200（11,536,384 B，application/pdf），短 slug `rm0490.pdf` 404，`rm0490.html` 产品页也 404。slug 含整篇标题，只能人从官网复制——所以插件**不建「RM 号→URL」表**（那就是又一张某版事实的快照），RM 通道只留 `--rm-pdf`（本机文件，含中文 PDF）与 `--rm-url`（人给的直链，下载按 `%PDF` 头校验后缓存到 `<facts>/rm/`）两个入口；`DSH_STM32_OFFLINE=1`/`--no-network` 时跳过并明说。
+- RM 源：`https://www.st.com/resource/en/reference_manual/rm0490-<全标题小写>.pdf` 实测 200（11,536,384 B，application/pdf），短 slug `rm0490.pdf` 404，`rm0490.html` 产品页也 404。slug 含整篇标题，只能人从官网复制——所以插件**不建「RM 号→URL」表**（那就是又一张某版事实的快照），RM 通道只留 `--rm-pdf`（本机文件，含中文 PDF）与 `--rm-url`（人给的直链，下载按 `%PDF` 头校验后缓存到 `<facts>/rm/`）两个入口；`DSH_ECAD_OFFLINE=1`/`--no-network` 时跳过并明说。
 > **§75 更正（同日）**：「只能人从官网复制」被证伪——ST 官方 `sitemap1..10.xml` 匿名可取、直接列出全部 132 条英文 reference_manual 直链；RM 载体由此做成双通道自动（sitemap 主 + stmcu CCC 备案）。仍然不建静态表：清单每次现取，不焊进代码——本节对「不焊快照表」的坚持是对的，错在以为没有机器可读的动态源。
 
 ### 获取链路（src/engine/facts-acquire.ts）
@@ -5307,7 +5307,7 @@ R3 自动抽取 rm-facts（引文逐字回查 + 与本线 SVD 位域交叉两道
 
 ### 抽取器为什么用 pymupdf 而不是插件自研
 
-引文必须来自被核验的那一份文本。Node 侧压平索引（§75）没有页边界与大小写，做不了 page±3 回查——它负责覆盖判定那一层就够。`extract-rm-facts.mjs` 调 pymupdf（`DSH_STM32_PYTHON` 可覆盖解释器），不可用就明确失败并指路，绝不降级到自研抽取凑数。归一化口径：折叠空白、匹配用小写副本、引文保留原大小写（ASCII 下两者等长，注释里写明了 Unicode 边界）。
+引文必须来自被核验的那一份文本。Node 侧压平索引（§75）没有页边界与大小写，做不了 page±3 回查——它负责覆盖判定那一层就够。`extract-rm-facts.mjs` 调 pymupdf（`DSH_ECAD_PYTHON` 可覆盖解释器），不可用就明确失败并指路，绝不降级到自研抽取凑数。归一化口径：折叠空白、匹配用小写副本、引文保留原大小写（ASCII 下两者等长，注释里写明了 Unicode 边界）。
 
 ### 机检当场抓到一条旧误记
 
@@ -5558,21 +5558,21 @@ f0 736 B / f1 1404 B / f2 932 B / f3 948 B / f4 960 B / f7、c0、g0、g4、l0�
 ### 二、布局与解析
 
 - **flat 布局**：`assets/manifest.json` 与 `device/` 同层，不套 `<version>/`。`bundledAssetsRoot()` 用 `path.resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets")`，`lib/engine/assets.js` 正好解析到包根 `assets/`。
-- `assetsRootInfo(env)`：默认 `origin="插件内置（assets/）"`；`DSH_STM32_ASSETS` 非空仍覆盖（开发与单测），可指向 flat 或旧的 `<version>/install.json` 多版本布局。
+- `assetsRootInfo(env)`：默认 `origin="插件内置（assets/）"`；`DSH_ECAD_ASSETS` 非空仍覆盖（开发与单测），可指向 flat 或旧的 `<version>/install.json` 多版本布局。
 - `listInstalledVersions` 先认 flat 根（`bundled=true`、`current=true`、`installedAt="插件内置"`），再列外部历史版本；flat 存在时 current 只给 flat。`readLocalManifest` 同样先 flat，`versionDir` 就是根。
 - `ensureAssets` 退化成**纯本地完整性检查**：manifest + `device/f1/chips.json` 存在即 `ok/cache/bundled`，缺则 `missing` 并让人重装插件。为不打断调用方，旧参数 `source/fetchImpl/timeoutMs/signal` 保留但不使用，`EnsureAssetsStatus` 仍含 `refreshed`（永不产生）。
 
 ### 三、删掉下载器
 
 - `src/engine/assets.ts` 整体重写（约 800 行）：删除 `ASSETS_SOURCES`、`resolveSources`、`fetchManifest`、`verifyAndInstall` 与全部下载/staging 代码；保留 `parseManifest`、glob/profile、逐文件 sha256 校验、`resolveAssetFile`、`verifyInstalled`、`pruneOldVersions`。
-- `pruneOldVersions` 在 `base === bundledAssetsRoot()` 时直接返回，**绝不删包内资源**；只有 `DSH_STM32_ASSETS` 下的历史版本与 `.tmp-*` 会被清。
+- `pruneOldVersions` 在 `base === bundledAssetsRoot()` 时直接返回，**绝不删包内资源**；只有 `DSH_ECAD_ASSETS` 下的历史版本与 `.tmp-*` 会被清。
 - `src/tools/assets.ts` 重写：`list/verify` 查内置资源并逐文件标 present/missing；`refresh` 保留为 `verify` 的别名（文案明说「资源随插件内置，不需要下载」）；`prune` 只清外部历史版本。输出 schema 14 个必填字段不变（`attempts` 恒空、`offlineFallback` 改为内置说明）。
 - 文案统一：`ASSETS_REFRESH_HINT` 改为「资源随插件内置（assets/）：缺文件说明安装不完整，重装插件后重试；stm32_assets verify 可定位缺了哪些」，`SVD_FULL_PROFILE_HINT` 改为「SVD 只在 profile=full 里：重装插件（或确认安装完整）」。涉及 `svd.ts`、`device-facts.ts`、`stm32f1.ts`、`scaffold.ts`、`hal-chip.ts`、`register-template.ts`、`regs.ts` 等 20 个文件。
 
 ### 四、打包与护栏
 
 - `package.json` 的 `files` 加 `assets`；`scripts/pack-size.mjs` 的 `MAX_TARBALL` 从 1.2 MB 提到 **4 MB**（不是按源文件 12.5 MB 提，因为设备头是文本、压缩后很小：实测 1.75 MB），`REQUIRED` 增加 `assets/manifest.json` / `assets/device/f1/chips.json` / `assets/ioc/minimal/STM32F103C8Tx.ioc`。
-- `scripts/pack-smoke.mjs`：断言解包后有 assets 关键文件；建寄存器工程时清空 `DSH_STM32_ASSETS`，强制走解包后 `lib/engine/assets.js` 的 `../../assets` 解析——这一步才真正证明资源进了 tarball。
+- `scripts/pack-smoke.mjs`：断言解包后有 assets 关键文件；建寄存器工程时清空 `DSH_ECAD_ASSETS`，强制走解包后 `lib/engine/assets.js` 的 `../../assets` 解析——这一步才真正证明资源进了 tarball。
 - `test/assets-units.test.mjs` 整体重写：13 条全离线用例，覆盖 flat/旧版本发现、readLocalManifest、ensureAssets、resolveAssetFile、verifyInstalled、prune 安全、工具 list/verify/refresh/prune；`svd-units` 与 `stm32f1-units` 的旧 `refresh` 文案断言同步改为新提示。
 
 ### 五、验收
@@ -5586,7 +5586,7 @@ f0 736 B / f1 1404 B / f2 932 B / f3 948 B / f4 960 B / f7、c0、g0、g4、l0�
 ### 六、教训
 
 - **别把「资源包」当成永久概念**：下载器、三源回退、staging 回滚、profile 安装开关，在资源随包后全是死代码；留着只会让「缺文件」被误诊成网络问题。删掉后 `ensureAssets` 的语义反而更清楚——它只是在检查安装完整性。
-- **flat 与 versioned 必须并存**：外部 `DSH_STM32_ASSETS` 的历史版本还在用户机器上，直接只认 flat 会让老夹具与老缓存全失效；flat 优先、旧版兜底，两边都测。
+- **flat 与 versioned 必须并存**：外部 `DSH_ECAD_ASSETS` 的历史版本还在用户机器上，直接只认 flat 会让老夹具与老缓存全失效；flat 优先、旧版兜底，两边都测。
 - **体积护栏要按产物量级设，不是按源文件量级**：12.5 MB 源文件打成 1.75 MB tarball；按源文件设上限会让护栏失去意义。
 - **文案断言是最容易漏的回归**：删下载器后 `refresh --profile full` 的提示全变了，`svd-units` / `stm32f1-units` 立刻红；工具文案是契约，改语义必须同步测试与 README。
 
@@ -5603,7 +5603,7 @@ f0 736 B / f1 1404 B / f2 932 B / f3 948 B / f4 960 B / f7、c0、g0、g4、l0�
 
 ### 二、文件契约（没有 RPC）
 
-目录 `%USERPROFILE%\.dsh-stm32\serial\<sessionId>\`（`DSH_STM32_SERIAL_HOME` 改根）：
+目录 `%USERPROFILE%\.dsh-stm32\serial\<sessionId>\`（`DSH_ECAD_SERIAL_HOME` 改根）：
 
 - `session.json`：会话参数（端口、波特率、8N1、dtr/rts、编码、换行、persist、超时、maxLines/maxBytes）。
 - `status.json`：`opening|open|closed|error`，桥每 1 s 心跳；`open` 等它到 `state=open`（上限 5 s）。
@@ -5617,7 +5617,7 @@ f0 736 B / f1 1404 B / f2 932 B / f3 948 B / f4 960 B / f7、c0、g0、g4、l0�
 
 - 模块级 `active` 只允许一个会话；重复 `open` 返回 `already-open` 并提示先 `close`。并发两次 `open` 由引擎的 `openChain` 串行化（t14 修）：一次成功、一次 `already-open`。
 - 默认（`src/data/serial-config.ts`）：115200 / 8 / 1 / none 校验 / 无流控 / **dtr=false、rts=false** / utf8 / CRLF；会话参数 `timeoutMs=1000`（上限 30000）、`maxLines=200`、`maxBytes=65536`、`idleTimeoutMs=600000`、`maxLogBytes=8 MB`、`persist=false`。波特率 50–4000000，数据位 5–8。
-- 端口记忆 `%USERPROFILE%\.dsh-stm32\serial.json`（`DSH_STM32_SERIAL_CONFIG` 覆盖；`DSH_STM32_NO_CONFIG=1` 关闭）：身份三档 `usb:VID:PID:序列号` → `usb:VID:PID@位置` → `com:COMx`，最多 32 个、按最后使用淘汰；**只有成功 open 才写**。
+- 端口记忆 `%USERPROFILE%\.dsh-stm32\serial.json`（`DSH_ECAD_SERIAL_CONFIG` 覆盖；`DSH_ECAD_NO_CONFIG=1` 关闭）：身份三档 `usb:VID:PID:序列号` → `usb:VID:PID@位置` → `com:COMx`，最多 32 个、按最后使用淘汰；**只有成功 open 才写**。
 
 ### 四、工具层与错误
 
@@ -5638,9 +5638,9 @@ f0 736 B / f1 1404 B / f2 932 B / f3 948 B / f4 960 B / f7、c0、g0、g4、l0�
 ### 六、验收
 
 - `npx tsc --noEmit` exit 0；`npm run build` exit 0。
-- `test/serial-units.test.mjs`：**23 pass / 0 fail**，全部走 `test/fixtures/serial-fake-bridge.mjs` 假桥（同一份文件契约；`DSH_STM32_SERIAL_FAKE_FAIL` / `DSH_STM32_SERIAL_FAKE_SLOW_OPEN_MS` 两个钩子造失败与慢 open）。
+- `test/serial-units.test.mjs`：**23 pass / 0 fail**，全部走 `test/fixtures/serial-fake-bridge.mjs` 假桥（同一份文件契约；`DSH_ECAD_SERIAL_FAKE_FAIL` / `DSH_ECAD_SERIAL_FAKE_SLOW_OPEN_MS` 两个钩子造失败与慢 open）。
 - 全量 `node test/run-units.mjs`：**TOTAL pass=932 fail=0**（t15 时点）。
-- **真桥只验到失败路径**：用真 PowerShell + 真 `bridge.ps1`、`DSH_STM32_SERIAL_PORTS` 造一个不存在的 COM99 → `port-not-found`；`status.json`/`bridge.log` 落盘正确、无残留 pid、`orphanDirs=0`。成功路径（`state=open`、真实收数、DTR/RTS 实际电平、5 s 看门狗、idle 自动放口、`port-busy`/`access-denied` 真机样本）**没有硬件证据**：本机无板、也没有第二个 COM 口可占。
+- **真桥只验到失败路径**：用真 PowerShell + 真 `bridge.ps1`、`DSH_ECAD_SERIAL_PORTS` 造一个不存在的 COM99 → `port-not-found`；`status.json`/`bridge.log` 落盘正确、无残留 pid、`orphanDirs=0`。成功路径（`state=open`、真实收数、DTR/RTS 实际电平、5 s 看门狗、idle 自动放口、`port-busy`/`access-denied` 真机样本）**没有硬件证据**：本机无板、也没有第二个 COM 口可占。
 - `turn/end` 的真实宿主事件只做了代码审读；`powershell-missing` 未实测（本机必装）。
 
 ### 七、未做 / 已知风险
@@ -5915,7 +5915,7 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - 新增 `openocdTargetProblem(openocdPath, chooseOpenocdTarget(familyProfileOf(cpn)))`：优先看绝对 target 是否存在；相对 target 从 openocd 可执行文件的 `../share/openocd/scripts`、`../../share/openocd/scripts`、`./scripts` 找 scripts 根，再查 `target/<cfg>`。找不到 scripts 根时返回空（未知，不误报）；确实缺 target 时，有 CubeProgrammer 记 note，否则 blocker。
 - USB 正常时列出实见探针类型；J-Link 驱动错误时明确写「必须装 SEGGER USB 驱动，只装 OpenOCD 不够」。
 - 自动发现 `looksLikeBinDir` 从 gcc/openocd/cmake 扩到 `arm-none-eabi-gcc` / `arm-none-eabi-gdb` / `gdb-multiarch` / `openocd` / `cmake` / `ninja`，只补了 gdb 或 ninja 的 MSYS2 目录不再漏掉。
-- J-Link 仍只有一条官方 8.18.0 直链；新增 `DSH_STM32_JLINK_URL` + `DSH_STM32_JLINK_SHA256` 成对覆盖，缺哈希或非法哈希直接回官方源，不引入不可校验镜像。
+- J-Link 仍只有一条官方 8.18.0 直链；新增 `DSH_ECAD_JLINK_URL` + `DSH_ECAD_JLINK_SHA256` 成对覆盖，缺哈希或非法哈希直接回官方源，不引入不可校验镜像。
 
 ### 六、验证
 
@@ -5953,6 +5953,11 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 
 结果：可达性 `unreachable: 0`、**285 pass / 0 fail**（固件套件整份删除，345 → 285）、包体 **636.7 KB / 169 文件 / 解包 2915.8 KB**（原 1121.2 KB / 256 文件）。
 
+
+补两步（同一轮）：
+
+1. **环境变量改名**：对外统一 `DSH_ECAD_*`，读的时候先看新名、再退回旧名（`src/engine/env-compat.ts` 的 `envValue()`）——已经配过 `DSH_STM32_*` 的机器不会因此失效。`~/.dsh-ecad/config.json` 优先，没有时读旧路径 `~/.dsh-stm32/config.json`（`cubeMxRoots` 这类是机器级事实，两边共用一份更省事）。顺手修了一个真 bug：`toolchain-config.ts` 里把 `envValue(env,"CONFIG")` 当成了完整变量名，等于永远读不到 `DSH_*_CONFIG`。
+2. **面板死代码**：页签只剩「概览 / 事件 / 流程图 / 电路设计 / 故障」，`PinoutPanel`/`ClockPanel`/`InterruptPanel`/`IocDiffPanel`/`ArtifactPanel` 与它们专属的 hooks 全部删除；再用「函数名在文件里只出现一次」做迭代清理，又清掉 30 个不可达组件/工具函数（`SerialCard`/`WatchAdmin`/`BuildCard`/`PinMap`/`ClockFlow`/`BreakpointPanel`/`WatchCurves`/`PinBox`/`sparklinePath` 等）。`client/client.js` 6797 → **4872 行**，包体 636.7 → **603.4 KB**。
 教训：拆插件不是把工具删掉就完了——**引擎层、测试层、打包脚本各自都有一份「谁还在用」的答案**，只有从入口做可达性分析，三份答案才对得上。
 
 ### 一百九十七、制造整包：一个 zip 里放齐板厂与 SMT 厂要的东西（S190）
@@ -6705,7 +6710,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 事件链路（服务端）：
 
 - `src/engine/event-bus.ts`：纯内存、无定时器。`EVENT_RING_LIMIT = 5000`、`EVENT_PAYLOAD_LIMIT = 8192`、`EVENT_PENDING_LIMIT = 2000`。`emitEvent()` 分配单调 `seq` 与 ISO 毫秒时间；payload 超限截成 `{preview}` 并置 `truncated`；环形挤出的事件进待落盘队列，队列再满则计入缺口计数。导出 `subscribeEvents` / `eventSnapshot(since)` / `drainEvicted` / `requeueEvicted` / `takeDroppedCount` / `setEventSessionKey` / `resetEventBus`。
-- `src/engine/event-log.ts`：`EVENT_LOG_INTERVAL_MS = 30_000`，`evidenceRoot()` 默认 `~/.dsh-stm32/evidence`（`DSH_STM32_EVIDENCE` 可覆盖），目录为 `<root>/<yyyy-mm-dd>/<会话键>/events-<HHmmss>.jsonl`；`safeSessionKey()` 把非 `[A-Za-z0-9._-]` 归一成 `-`。有缺口时先写一条 `kind:"log" status:"fail"` 的缺口事件，避免证据看起来连续；写失败把本批放回队列。
+- `src/engine/event-log.ts`：`EVENT_LOG_INTERVAL_MS = 30_000`，`evidenceRoot()` 默认 `~/.dsh-stm32/evidence`（`DSH_ECAD_EVIDENCE` 可覆盖），目录为 `<root>/<yyyy-mm-dd>/<会话键>/events-<HHmmss>.jsonl`；`safeSessionKey()` 把非 `[A-Za-z0-9._-]` 归一成 `-`。有缺口时先写一条 `kind:"log" status:"fail"` 的缺口事件，避免证据看起来连续；写失败把本批放回队列。
 - `src/engine/tool-events.ts`：装配期给 ctx 套 Proxy，只替换 `tools.register`，给 25 个 `stm32_*` 工具包一层 start / ok / fail；其余属性绑定到真实 ctx 转发，避免破坏 cordis 的 this 语义。名字不以 `stm32_` 开头的工具原样注册。
 - `src/engine/channels.ts`：串口 / RTT / 监视输出编成 `kind: "channel:<名字>"` 的事件，单行截 400 字符、单次最多 400 行（`CHANNEL_LINE_LIMIT`），摘要写「串口 12 行」，超限标注「面板保留前 N 行」。
 - `GET /dsh-stm32/api/events`：SSE。先补发 `?since=` 之后的存量，再推增量；15 秒心跳（`x-accel-buffering: no`），请求断开时清理订阅。路由在 `registerWebRoutes` 里特殊处理，不进 JSON 分发器。
@@ -6849,12 +6854,12 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 
 - 问题：改完 .ioc 再生成代码，外设与引脚会变，但没有「和上次比」的入口；git 未必可用，工程也可能不是自己的。
 - 做法：基线单独存，不依赖版本库。
-  - `src/engine/ioc-diff.ts`：`parseIocEntries` 收 `key=value`（跳过注释、空行、无等号行，重复键取第一次）；`diffIocEntries` 分新增 / 删除 / 改动三表并按 key 排序；`snapshotPath` 用工程绝对路径的 sha256 前 16 位命名，目录默认 `~/.dsh-stm32/ioc-snapshots`，可用 `DSH_STM32_SNAPSHOTS` 覆盖。
+  - `src/engine/ioc-diff.ts`：`parseIocEntries` 收 `key=value`（跳过注释、空行、无等号行，重复键取第一次）；`diffIocEntries` 分新增 / 删除 / 改动三表并按 key 排序；`snapshotPath` 用工程绝对路径的 sha256 前 16 位命名，目录默认 `~/.dsh-stm32/ioc-snapshots`，可用 `DSH_ECAD_SNAPSHOTS` 覆盖。
   - `POST /ioc-diff/save` 复制当前 .ioc 覆盖基线；`GET /ioc-diff?projectDir=` 返回 `{hasSnapshot,savedAt,added,removed,changed,counts,notes}`，没有基线时 `hasSnapshot=false` 并在 notes 里提示。
   - 面板「变更」标签：头部给基线时间与三类计数，「记下当前配置」重新记基线；三张表分别用 `+` / `-` / `~` 前缀。
 - 语义边界：基线只有一份，覆盖式保存、不留历史；比较的是配置键，不是工程产物；.ioc 由 CubeMX 重写时注释行与键序变化不会算作差异（解析只认键值）。
 - 测试：`test/ioc-diff-units.test.mjs` 4 条 + `/ioc-diff` 路由用例 + 验收里「记基线 → 改文件 → 比出新增与删除」。
-- 教训：验收脚本要连同子目录一起隔离——首版只把 `DSH_STM32_EVIDENCE` 指到临时目录，基线仍写进用户主目录，靠 `DSH_STM32_SNAPSHOTS` 补上。
+- 教训：验收脚本要连同子目录一起隔离——首版只把 `DSH_ECAD_EVIDENCE` 指到临时目录，基线仍写进用户主目录，靠 `DSH_ECAD_SNAPSHOTS` 补上。
 - 计数：71 套件 / **997 pass / 0 fail**；`client/client.js` 2420 行；包体 1892.0 KB / 283 文件 / 解包 15413.8 KB。
 
 ### 十七、状态筛选与导出（S15）
@@ -7030,7 +7035,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 做法：写入成功后立刻 `saveIocSnapshot(projectDir)`，把结果写进报告 notes。
   - 只挂在成功路径；回滚分支不记——回滚后的基线应该由人决定（回滚是「恢复旧配置」，不是「新配置落定」）。
   - 记基线失败不翻转工具结论：报告写「基线未更新：<原因>」，写入本身仍然算成功。
-  - `saveIocSnapshot` 读 `process.env`，单测用 `DSH_STM32_SNAPSHOTS` 指到临时目录；`snapshotPath(projectDir, env)` 也要传同一份 env，否则断言会去用户主目录找。
+  - `saveIocSnapshot` 读 `process.env`，单测用 `DSH_ECAD_SNAPSHOTS` 指到临时目录；`snapshotPath(projectDir, env)` 也要传同一份 env，否则断言会去用户主目录找。
 - 测试：新增 `test/ioc-apply-tool-units.test.mjs`，用假 `ctx.tools.register` 抓注册对象、真 `execute({projectDir, planId})`，断言基线与写入后的 .ioc 一致（`readIocDiff` 三张表全空）。**工具级测试要用 `node:test` 的 `test()`**，否则 `run-units.mjs` 解析不到 `ℹ pass`，会报「1 个套件未统计」。
 - 计数：75 套件 / **1021 pass / 0 fail**；包体 1915.0 KB / 288 文件 / 解包 15508.5 KB。
 - 教训：把「副作用」挂在最靠近真动作的那一层（写入成功处），比让使用者记得点按钮可靠。
@@ -7477,8 +7482,8 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 ### 八十一、证据落盘与保留可配置（S78）
 
 - 问题：S72 之后正常会话也落盘，但节奏与保留是写死的（30 秒、7 天、20 会话）。想留长一点、或嫌写得勤，都得改代码。
-- 做法：`src/engine/event-log.ts` 新增 `evidencePolicy(env)`，三项各自独立解析，优先级「环境变量 > 配置文件 > 默认」：环境变量 `DSH_STM32_EVIDENCE_FLUSH_SECONDS` / `_KEEP_DAYS` / `_KEEP_SESSIONS`；配置文件的 `evidenceFlushSeconds` / `evidenceKeepDays` / `evidenceKeepSessions`；默认 30 秒 / 7 天 / 20 会话。每项夹到 `POLICY_LIMITS`（5–3600 秒、0–365 天、1–200 会话），并返回 `sources` 说明这一项从哪来——面板据此显示「每 30 s 落盘 · 保留 7 天 / 20 会话」并可在 `title` 里看到来源。`startEventLog` 用 `policy.flushSeconds` 当拍间隔、把 `keepDays` / `keepSessions` 传给 `pruneEvidence`；`/evidence` 回 policy，`/evidence/prune` 按 policy 清。
-- 两个边界：`DSH_STM32_NO_CONFIG=1` 时不读配置文件（与工具链配置同一开关，测试与验收可完全隔离）；时间间隔有下限 5 秒，避免有人把定时器开成秒级轮询把磁盘写满。
+- 做法：`src/engine/event-log.ts` 新增 `evidencePolicy(env)`，三项各自独立解析，优先级「环境变量 > 配置文件 > 默认」：环境变量 `DSH_ECAD_EVIDENCE_FLUSH_SECONDS` / `_KEEP_DAYS` / `_KEEP_SESSIONS`；配置文件的 `evidenceFlushSeconds` / `evidenceKeepDays` / `evidenceKeepSessions`；默认 30 秒 / 7 天 / 20 会话。每项夹到 `POLICY_LIMITS`（5–3600 秒、0–365 天、1–200 会话），并返回 `sources` 说明这一项从哪来——面板据此显示「每 30 s 落盘 · 保留 7 天 / 20 会话」并可在 `title` 里看到来源。`startEventLog` 用 `policy.flushSeconds` 当拍间隔、把 `keepDays` / `keepSessions` 传给 `pruneEvidence`；`/evidence` 回 policy，`/evidence/prune` 按 policy 清。
+- 两个边界：`DSH_ECAD_NO_CONFIG=1` 时不读配置文件（与工具链配置同一开关，测试与验收可完全隔离）；时间间隔有下限 5 秒，避免有人把定时器开成秒级轮询把磁盘写满。
 - 验证：tsc 0、build 0、**79 套件 / 1065 pass / 0 fail**（event-bus-units 加「默认值、环境变量夹取、配置文件生效」一条）、ACCEPTANCE OK（新增「证据策略字段齐全（S78）」）、`test:pack` 0、`test:size` 1965.8 KB / 292 文件 / 解包 15726.5 KB、client 4795 行。
 - 教训：**可配置项要把「来源」一起报出来**。用户看到 30 秒与 60 秒的差别时，第一句话必然是「这值哪来的」；先给 `sources`，就不用再翻两份配置。
 
@@ -7549,10 +7554,10 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 问题：S84 让工程类接口在缺 `projectDir` 时先问会话工作目录，实测 `/projects` 仍把 profile 目录当工作区——`workingDirectory.ensure(undefined)` 在没有 agent 时给不出目录，resolver 只能返回空串。
 - 做法：
   - 新增 `src/engine/session-context.ts`：`noteSessionAgent(agent)` / `lastSessionAgent()`，只存最近一个 agent；`src/index.ts` 的 `session/event` 处理器每轮记一次（`session.agent`），`src/tools/project-dir.ts` 在工具入口也记一次。
-  - 新增 `src/engine/workspace-memo.ts`：`workspaceMemoPath`（默认 `~/.dsh-stm32/last-workspace.txt`，`DSH_STM32_HOME` 覆盖根）、`rememberWorkspace`（写失败静默）、`recallWorkspace`（读不到空串）。`resolveProjectDir` 定下目录后记一笔。
+  - 新增 `src/engine/workspace-memo.ts`：`workspaceMemoPath`（默认 `~/.dsh-stm32/last-workspace.txt`，`DSH_ECAD_HOME` 覆盖根）、`rememberWorkspace`（写失败静默）、`recallWorkspace`（读不到空串）。`resolveProjectDir` 定下目录后记一笔。
   - `web-api` 的兜底链变成「显式 → 会话工作目录 → 最近一次用过的工程 → 空（400）」；`/projects` 的工作区根同样多一档 `memoDir`。
-- 验证：79→**80 套件 / 1080 pass / 0 fail**（新增 `workspace-memo-units` 3 条与 `/pinout` 走备忘的用例；两条重复的 S84 用例合并，并用临时 `DSH_STM32_HOME` 隔离，否则本机备忘会把 400 用例变成 200）、ACCEPTANCE OK、`test:pack` 0、`test:size` 1973.4 KB / 295 文件 / 解包 15756.7 KB。
-- 回归隔离：`test/run-units.mjs` 现在整轮设 `DSH_STM32_HOME` 到临时目录——`resolveProjectDir` 每跑一次都会写备忘，不隔离时会把开发机真实 `~/.dsh-stm32/last-workspace.txt` 改成测试夹具路径，反过来让 web-api 的「缺参数回 400」用例变成 200。
+- 验证：79→**80 套件 / 1080 pass / 0 fail**（新增 `workspace-memo-units` 3 条与 `/pinout` 走备忘的用例；两条重复的 S84 用例合并，并用临时 `DSH_ECAD_HOME` 隔离，否则本机备忘会把 400 用例变成 200）、ACCEPTANCE OK、`test:pack` 0、`test:size` 1973.4 KB / 295 文件 / 解包 15756.7 KB。
+- 回归隔离：`test/run-units.mjs` 现在整轮设 `DSH_ECAD_HOME` 到临时目录——`resolveProjectDir` 每跑一次都会写备忘，不隔离时会把开发机真实 `~/.dsh-stm32/last-workspace.txt` 改成测试夹具路径，反过来让 web-api 的「缺参数回 400」用例变成 200。
 - 教训：**兜底链要一档一档可验证**。加了「会话目录」这一档不等于拿得到它——resolver 拿不到的输入（agent）要显式补上，否则新档位永远命中不了。
 
 ### 八十九、工程根已是工程时不再向下扫描（S84c）
@@ -7722,7 +7727,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 过程中修掉的自身缺陷：
   - **快照会过期**：`planEcadWorkspace()` 把 `initialized` 算在对象里，初始化之后立刻构建仍报「工作区还没初始化」；改成构建时现场看 `circuit/package.json`。
   - **漏传 ctx 会静默降级**：`projectDirOf()` 第一版写成 `resolveProjectDir(undefined, …)`，拿不到会话工作目录就落到插件进程的 cwd；改成显式传 `ctx`。
-  - **显式覆盖必须唯一**：`DSH_STM32_KICAD_ROOT` 指到不存在的目录时，旧逻辑会悄悄回落到默认安装，问题被藏起来；改成「指了就用它，找不到就报错」。
+  - **显式覆盖必须唯一**：`DSH_ECAD_KICAD_ROOT` 指到不存在的目录时，旧逻辑会悄悄回落到默认安装，问题被藏起来；改成「指了就用它，找不到就报错」。
   - **正则别把解释一起吃进去**：缺失模型的第一版正则把 `U18. File not found` 整段当成引用号；收敛为 `[^\s.:]+`。
 - 验证：新增 `test/ecad-units.test.mjs` 13 条（工具链定位与报错、工作区路径、初始化幂等、构建的三种失败提示与 argv 拼装、产物择新、ERC/DRC 解析、STEP 缺失模型），登记进 `test/run-units.mjs`；全量 **83 个套件 / 1129 pass / 0 fail**，ACCEPTANCE OK，`test:size` 1987.7 KB / 308 文件 / 解包 15846.1 KB。
 - 教训：**跨进程工具要把「下一步怎么做」写进返回值**。缺 bun、缺依赖、缺 `node_modules`、没有构建产物这几种情况，报一句「失败」用户无法行动；报「在哪个目录执行哪条命令，再重试」才有用。
@@ -7863,7 +7868,7 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
   - `npm`：候选 `npm` 与 `binDirs/npm.cmd`，`versionArgs ["--version"]`，说明写清「首次构建要 npm install 拉 tscircuit（约 730 MB）」。
   两项都带 `impact`（缺了哪些功能不可用、哪些不受影响）、`install`（三条：装法 / 非默认路径 / 自检）与 `verify`。
 - 能力：`src/engine/toolchain-gate.ts` 的 `ToolchainCapability` 增 `"ecad"`，`CAPABILITY_COMPONENTS.ecad = ["kicad", "npm"]`，`CAPABILITY_PRIMARY.ecad = "kicad"`；`src/commands/register.ts` 的能力表同步加「电路设计」。
-- 安装指引：`src/data/install-guides.ts` 的 `InstallComponent` 增 `kicad`、`npm`（都 `manual`），`guideFor()` 分派到新增的 `kicadGuide()`（官网下载 10.x、非默认目录设 `DSH_STM32_KICAD_ROOT`、自检 `kicad-cli version`、可整目录拷贝）与 `npmGuide()`（`winget install OpenJS.NodeJS.LTS`、自检 `npm --version`）。
+- 安装指引：`src/data/install-guides.ts` 的 `InstallComponent` 增 `kicad`、`npm`（都 `manual`），`guideFor()` 分派到新增的 `kicadGuide()`（官网下载 10.x、非默认目录设 `DSH_ECAD_KICAD_ROOT`、自检 `kicad-cli version`、可整目录拷贝）与 `npmGuide()`（`winget install OpenJS.NodeJS.LTS`、自检 `npm --version`）。
 - 报错文案：`src/engine/ecad/toolchain.ts` 找不到 KiCad 时不再只说「没找到」，而是给出「需要 KiCad 10（kicad-cli / bun / pcbnew）+ 装法 + `stm32_doctor` 看缺件」三段。
 - 测试：`test/ecad-units.test.mjs` 增 2 条——探测列表含 `kicad`/`npm` 且两者非必需、有安装步骤与自检，`guidesFor(["kicad","npm"])` 各给一份 manual 指引；`locateEcadToolchain` 指到不存在目录时错误里必须出现 `KiCad 10` 与 `stm32_doctor`。
 - 验证：83 套件 / **1144 pass / 0 fail**、ACCEPTANCE OK、`test:size` 2016.4 KB / 312 文件 / 解包 15952.4 KB。
@@ -7986,8 +7991,8 @@ P1 的目标不是再写一个布线器，而是**不再独占板子**：`stm32_
 - 入口取证：`wmsc.lcsc.com` 的商品接口 404、`easyeda.com/api/products/...` 403、`/datasheet/<编号>.pdf` 返回反爬 HTML——**唯一稳定入口是商品详情页** `https://www.lcsc.com/product-detail/<C编号>.html`，页面里写着 `datasheet.lcsc.com/datasheet/pdf/<hash>.pdf` 直链。实测 `C25137`：直链 467,557 B，`%PDF-1.5`。
 - 解析两处坑：详情页 JSON 把斜杠转义成 `\/`（先统一再匹配）；正则必须带捕获组（首版漏了组，`found[1]` 恒为 undefined，表现为「页面里没有直链」——这类错误只会静默变成一句人话，不会崩）。
 - 缓存布局：`~/.dsh-stm32/datasheets/<编号>/{meta.json,<sha256 前 12 位>.pdf}` + 顶层 `index.json`；索引丢了会从各目录 `meta.json` 重建（缓存目录被人手工动过时的自愈）。命中判据是「PDF 存在且 sha256 对得上」，不是「文件存在」。
-- 失败留痕：`_negative/<编号>.json` 记原因与时间，24 小时内不重试；`refresh` 可强制重试。离线（`DSH_STM32_OFFLINE=1`）只读缓存。
-- 礼貌：两次请求之间至少 1.5 s（`DSH_STM32_DS_MIN_GAP_MS` 可调），UA 写明用途，单份上限 40 MB，内容必须是 `%PDF-`；`meta.json` 永久记录来源地址与抓取时间，引用时可回溯。
+- 失败留痕：`_negative/<编号>.json` 记原因与时间，24 小时内不重试；`refresh` 可强制重试。离线（`DSH_ECAD_OFFLINE=1`）只读缓存。
+- 礼貌：两次请求之间至少 1.5 s（`DSH_ECAD_DS_MIN_GAP_MS` 可调），UA 写明用途，单份上限 40 MB，内容必须是 `%PDF-`；`meta.json` 永久记录来源地址与抓取时间，引用时可回溯。
 - 工具：`ecad_ds_fetch`（按编号 / `all` 补齐本工程 jlcpcb 器件 / `file` 手工导入）、`ecad_ds_list`（编号、型号、占用、时间）；`ecad_pdf_read` 的 `file` 支持直接写 `C25137` 或型号，命中缓存时按本地路径读并在 notes 里标注来源。
 - 真机：`C25137` 首次 467,557 B 落盘、二次调用 0 请求（`cached: true`）、`ecad_ds_list` 显示 1 份 457 KB；假 fetch 的单测覆盖「首次下载 → 命中缓存零请求 → 负缓存不重试 → 离线报错 → 手工导入」。
 - 教训：**外部资源的缓存要把「谁下的、什么时候、内容是否还是那份」一起记下来**；只存文件不存出处，等于下次还得重下，也不敢在方案里引用。
@@ -8155,7 +8160,7 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
   - 安装段拆成「安装插件（只需 DSH）→ 补齐工具链（按任务列：编译 / 烧录调试 / 生成代码，给出 `/stm32-env`、`/stm32-setup`）→ 开工前检查（`/stm32-doctor`）→ 内置资源 → 从源码安装」；前置条件表删除，`Node ≥ 20` 归到源码安装。
   - 调试台删掉「46 条路由 / SSE / 环形缓冲 5000 条 / payload 8 KB」，改为使用者视角：打开面板先补齐最近记录、之后实时追加、每 30 秒落盘、默认保留 7 天与 20 个会话。
   - 串口删掉「零 npm 依赖的 PowerShell 5.1 常驻桥」等实现说明；工具表内的 `probeError` 字段名、「数据比较器预算」「13 字节头」「halt 后 resume」改为效果描述。
-  - 环境变量表只留日常可用的项，开发用（`DSH_STM32_ASSETS` / `FACTS` / `SERIAL_BRIDGE` / `SERIAL_POWERSHELL` / `PYTHON`）收成一行；自动发现段删掉「进程内缓存」「路径净化」等实现细节。
+  - 环境变量表只留日常可用的项，开发用（`DSH_ECAD_ASSETS` / `FACTS` / `SERIAL_BRIDGE` / `SERIAL_POWERSHELL` / `PYTHON`）收成一行；自动发现段删掉「进程内缓存」「路径净化」等实现细节。
   - 已知限制表按「现象 → 处理」重写，去掉 `stm32_assets verify 定位缺件` 这类开发提示。
 - 复核：`node test/run-units.mjs` **80 套件 / 1088 pass / 0 fail**；`npm run test:size` **1943.0 KB / 295 文件 / 解包 15686.1 KB**（README 在 `files` 内，重排后比发布时小 37 KB）；两份均 410 行、节次一一对应，grep 无第二人称。
 - 提交 `docs: 双语 README 按工程工具专业简约风重排`；`v0.1.8` 删除后就地重建到该提交并 push（tag 与 main 同指该提交）。
@@ -8186,11 +8191,11 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
 - 真没装：「共享运行时未安装（装一次，所有工程共用）」；
 - 工程行从「依赖已安装 / 依赖未安装」改成「依赖已挂载 / 依赖未挂载」。
 
-顺手修掉一个 `env` 穿透问题：`ecadRuntimeDir()` 默认读 `process.env`，而 `handleWebApi` 的 `deps.env` 才是本进程看到的配置，测试用 `DSH_STM32_HOME` 指到临时目录时旧写法读不到——现在显式 `ecadRuntimeDir(env)`。
+顺手修掉一个 `env` 穿透问题：`ecadRuntimeDir()` 默认读 `process.env`，而 `handleWebApi` 的 `deps.env` 才是本进程看到的配置，测试用 `DSH_ECAD_HOME` 指到临时目录时旧写法读不到——现在显式 `ecadRuntimeDir(env)`。
 
 排查时的另一个教训：这些状态全是**按工程**算的。当前会话的工程是 `demo`（已初始化、已挂载、有构建产物），而面板显示「工作区未初始化 / 依赖未挂载 / 还没有构建产物」，说明它看的是另一个被选中的工程——先看下拉框选的是谁，再谈缺什么。
 
-验证：全量 **88 套件 / 1240 pass / 0 fail**、ACCEPTANCE OK、`test:pack` 通过、包体 2145.4 KB / 350 文件 / 解包 16398.6 KB；新增用例「GET /ecad：共享运行时与工程挂载分开报（S152）」（临时 `DSH_STM32_HOME` 下先报未就绪，造出 `cli.mjs` 后报就绪但 `linked:false`）。
+验证：全量 **88 套件 / 1240 pass / 0 fail**、ACCEPTANCE OK、`test:pack` 通过、包体 2145.4 KB / 350 文件 / 解包 16398.6 KB；新增用例「GET /ecad：共享运行时与工程挂载分开报（S152）」（临时 `DSH_ECAD_HOME` 下先报未就绪，造出 `cli.mjs` 后报就绪但 `linked:false`）。
 
 ### 一百五十八、点开「电路设计」整页空白：先判空再读字段（S150）
 
@@ -8347,7 +8352,7 @@ v0.1.7（2026-11-12）之后仓库里积了 100 个提交、S1–S89 一整条�
 
 - 背景：`tscircuit` 的依赖每个工程装一份是 730 MB、`npm i` 25–46 s；同一台机器上十几个工程就是十几个 730 MB。另一件事是「改完源码就忘了构建」，导致 KiCad 里看到的还是旧板子。
 - 依赖全局化（`src/engine/ecad/runtime.ts`）：
-  - 运行时目录 `~/.dsh-stm32/ecad-runtime`（`DSH_STM32_ECAD_RUNTIME` 可覆盖），里面只有一个 `package.json` 与一份 `node_modules`（`tscircuit` + `typescript`）。
+  - 运行时目录 `~/.dsh-stm32/ecad-runtime`（`DSH_ECAD_ECAD_RUNTIME` 可覆盖），里面只有一个 `package.json` 与一份 `node_modules`（`tscircuit` + `typescript`）。
   - `ensureEcadRuntime()` 三种模式：`auto` 真跑 `npm install`、`ask` 只回「缺什么、怎么装」、`off` 一律不装；默认 `ask`——730 MB 的下载不能藏在一次点击里。
   - `linkRuntimeIntoProject()` 用 Windows 目录联接（`fs.symlinkSync(target, path, "junction")`，不需要管理员权限）把运行时挂成工程的 `hardware/circuit/node_modules`：ESM 解析要求 `node_modules` 出现在工程树里，联接让它「看起来像」本地安装，磁盘只占一份。
   - 第一版把联接指向运行时**根目录**（`~/.dsh-stm32/ecad-runtime`），于是工程里的 `node_modules/tscircuit` 根本不存在——运行时自己还有一层 `node_modules/`。联接必须指向 `runtime/node_modules`；真机表现为「联接建成了、构建仍报依赖未安装」，靠 `realpath + readdir` 才看清。

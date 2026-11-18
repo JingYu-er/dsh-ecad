@@ -178,7 +178,7 @@ if __name__ == "__main__":
 
 /** 预演与写入共用同一个脚本路径；内容变了才重写。 */
 export function swapScriptPath(): string {
-  return join(tmpdir(), "dsh-stm32-swap", "pcb_swap.py");
+  return join(tmpdir(), "dsh-ecad-swap", "pcb_swap.py");
 }
 
 export function ensureSwapScript(): string {
@@ -211,8 +211,8 @@ export async function runSwap(deps: SwapDeps, request: SwapRequest): Promise<Swa
   if (!libId.includes(":")) return { ...EMPTY_SWAP, error: "footprint 要写成 Lib:Name，例如 Package_QFP:LQFP-48_7x7mm_P0.5mm" };
   const script = ensureSwapScript();
   const stamp = String(Date.now());
-  const payloadFile = join(tmpdir(), "dsh-stm32-swap", "payload-" + stamp + ".json");
-  const resultFile = join(tmpdir(), "dsh-stm32-swap", "result-" + stamp + ".json");
+  const payloadFile = join(tmpdir(), "dsh-ecad-swap", "payload-" + stamp + ".json");
+  const resultFile = join(tmpdir(), "dsh-ecad-swap", "result-" + stamp + ".json");
   writeFileSync(
     payloadFile,
     JSON.stringify({ board: request.boardFile, ref: request.ref.trim(), footprint: libId, footprintDir: request.footprintDir, apply: request.apply }),

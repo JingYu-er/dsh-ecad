@@ -11,6 +11,7 @@ import { join } from "node:path";
 import type { SubprocessService } from "../../../types.js";
 import { runCapture } from "../../subprocess-runner.js";
 import { ecadHome } from "../../ecad-home.js";
+import { envValue } from "../../env-compat.js";
 
 export interface KrtRuntime {
   root: string;
@@ -54,7 +55,7 @@ const AUTHOROUTE_REL = join("py_router", "autoroute.py");
  */
 /** 运行时根目录：显式变量优先，否则落在插件自己的 home 下。 */
 export function krtRoot(env: Record<string, string | undefined> = process.env): string {
-  const explicit = (env["DSH_STM32_KRT_ROOT"] ?? "").trim().replace(/\\/gu, "/");
+  const explicit = (envValue(env, "KRT_ROOT") ?? "").trim().replace(/\\/gu, "/");
   if (explicit !== "") return explicit;
   return ecadHome(env).replace(/\\/gu, "/") + "/kicad-routing-tools";
 }

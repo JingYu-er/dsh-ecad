@@ -4,7 +4,7 @@
 `dsh-stm32-assets` 并入插件仓库：不再有第二个仓库，也不再需要联网 `refresh`，装好插件即离线可用。
 
 运行时按 **flat 布局**读：`assets/manifest.json` 与 `device/`、`ioc/` 等同层。
-`lib/engine/assets.js` 从包根解析 `assets/`；`DSH_STM32_ASSETS` 仍可指向外部目录（开发与测试用），
+`lib/engine/assets.js` 从包根解析 `assets/`；`DSH_ECAD_ASSETS` 仍可指向外部目录（开发与测试用），
 外部目录既可以也是 flat，也可以保留旧的 `<版本>/install.json` 多版本布局。
 
 ## 目录
@@ -75,7 +75,7 @@ node scripts/assets/build-assets.mjs --svd path/to/STM32F103.svd --svd-dir path/
 ```
 
 运行时用 `stm32_assets` 的 `list` / `verify` 查看与逐文件校验；`prune` 只清理
-`DSH_STM32_ASSETS` 下遗留的历史版本目录，**不会删除包内资源**。
+`DSH_ECAD_ASSETS` 下遗留的历史版本目录，**不会删除包内资源**。
 
 ## 许可与来源
 

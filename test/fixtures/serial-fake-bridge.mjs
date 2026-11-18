@@ -15,7 +15,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const ipc = process.env.DSH_STM32_SERIAL_IPC ?? "";
+const ipc = process.env.DSH_ECAD_SERIAL_IPC ?? "";
 if (ipc === "") process.exit(3);
 
 const statusPath = join(ipc, "status.json");
@@ -108,7 +108,7 @@ function handle(command) {
 }
 
 // 测试钩子：模拟桥在 Open() 阶段失败（引擎只看到 status.error + 进程退出）
-const failKind = process.env.DSH_STM32_SERIAL_FAKE_FAIL ?? "";
+const failKind = process.env.DSH_ECAD_SERIAL_FAKE_FAIL ?? "";
 if (failKind !== "") {
   const cause =
     failKind === "port-busy"
@@ -128,7 +128,7 @@ mkdirSync(cmdDir, { recursive: true });
 mkdirSync(doneDir, { recursive: true });
 writeFileSync(join(ipc, "bridge.pid"), String(process.pid));
 // 测试钩子：slow-open 模拟「桥启动比 5 s 窗口还慢」，用来验证引擎的收尾不会留孤儿。
-const slowOpenMs = Number(process.env.DSH_STM32_SERIAL_FAKE_SLOW_OPEN_MS) || 0;
+const slowOpenMs = Number(process.env.DSH_ECAD_SERIAL_FAKE_SLOW_OPEN_MS) || 0;
 if (slowOpenMs > 0) {
   writeStatus();
   setTimeout(() => {

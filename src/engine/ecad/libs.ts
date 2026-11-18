@@ -183,7 +183,7 @@ function splitLibName(full: string): [string, string] {
 function libTableEntry(lib: string, uri: string): string {
   return (
     '  (lib (name "' + lib + '") (type "KiCad") (uri "' + uri.replace(/\\/gu, "/") + '")' +
-    ' (options "") (descr "dsh-stm32 导出"))\n'
+    ' (options "") (descr "dsh-ecad 导出"))\n'
   );
 }
 
@@ -300,7 +300,7 @@ export function exportEmbeddedLibraries(
       seen.add(item.name);
       const body = item.raw.replace(
         /^\(footprint\s+"[^"]*"/u,
-        '(footprint "' + item.name + '" (version 20240108) (generator "dsh-stm32")',
+        '(footprint "' + item.name + '" (version 20240108) (generator "dsh-ecad")',
       );
       writeFileSync(join(dir, item.name + ".kicad_mod"), body + "\n", "utf8");
     }
@@ -323,7 +323,7 @@ export function exportEmbeddedLibraries(
     const body = items.map((item) => "  " + item.raw + "\n").join("");
     writeFileSync(
       file,
-      '(kicad_symbol_lib (version 20231120) (generator "dsh-stm32") (generator_version "1.0")\n' + body + ")\n",
+      '(kicad_symbol_lib (version 20231120) (generator "dsh-ecad") (generator_version "1.0")\n' + body + ")\n",
       "utf8",
     );
     symbolLibs.push({ lib, count: items.length, file });

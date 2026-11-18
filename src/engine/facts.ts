@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { loadRmTopics } from "../data/rm-topics.js";
 import { ecadHome } from "./ecad-home.js";
+import { envValue } from "./env-compat.js";
 
 /** facts 包里的语义条目（由 RM 抽取，带页码）。 */
 export interface FactsSemantic {
@@ -49,9 +50,9 @@ export interface FactsSummary {
   rmPath: string;
 }
 
-/** facts 缓存根（可用 DSH_STM32_FACTS 覆盖）。 */
+/** facts 缓存根（可用 DSH_ECAD_FACTS 覆盖）。 */
 export function factsRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const custom = env.DSH_STM32_FACTS;
+  const custom = envValue(env, "FACTS");
   return custom !== undefined && custom !== "" ? custom : join(ecadHome(), "facts");
 }
 

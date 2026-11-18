@@ -83,7 +83,7 @@ export function initEcadWorkspace(workspace: EcadWorkspace): InitResult {
     const pkgPath = join(workspace.circuitDir, "package.json");
     if (!existsSync(pkgPath)) {
       const pkg = {
-        name: "dsh-stm32-circuit",
+        name: "dsh-ecad-circuit",
         private: true,
         version: "0.0.0",
         devDependencies: {
@@ -188,7 +188,7 @@ export async function runTsciBuild(request: TsciBuildRequest): Promise<TsciBuild
     notes,
   });
 
-  if (toolchain.bun === "") return fail("没找到 bun：它随 KiCad 一起安装，或用 DSH_STM32_BUN 指定");
+  if (toolchain.bun === "") return fail("没找到 bun：它随 KiCad 一起安装，或用 DSH_ECAD_BUN 指定");
   if (!existsSync(join(workspace.circuitDir, "package.json"))) {
     return fail("ECAD 工作区还没初始化：先运行 stm32_ecad_init 生成 " + workspace.circuitDir);
   }

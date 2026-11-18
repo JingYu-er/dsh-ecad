@@ -50,7 +50,7 @@ function fakeWorkspace(root) {
 }
 
 test("运行时目录：环境变量优先，其次用户主目录", () => {
-  assert.equal(ecadRuntimeDir({ DSH_STM32_ECAD_RUNTIME: "D:/rt" }), "D:/rt");
+  assert.equal(ecadRuntimeDir({ DSH_ECAD_ECAD_RUNTIME: "D:/rt" }), "D:/rt");
   assert.equal(ecadRuntimeDir({ DSH_ECAD_HOME: "D:/home" }), join("D:/home", "ecad-runtime"));
   assert.equal(ecadRuntimeDir({ USERPROFILE: "C:/Users/x" }), join("C:/Users/x", ".dsh-ecad", "ecad-runtime"));
   const fallback = ecadRuntimeDir({ USERPROFILE: "C:/Users/x" });
@@ -93,8 +93,8 @@ test("依赖联接：只在工程里造出指向共享运行时的 node_modules"
 });
 
 test("安装模式：环境变量解析为 auto / ask / off", () => {
-  assert.equal(runtimeInstallMode({ DSH_STM32_ECAD_AUTO_INSTALL: "auto" }), "auto");
-  assert.equal(runtimeInstallMode({ DSH_STM32_ECAD_AUTO_INSTALL: "off" }), "off");
+  assert.equal(runtimeInstallMode({ DSH_ECAD_ECAD_AUTO_INSTALL: "auto" }), "auto");
+  assert.equal(runtimeInstallMode({ DSH_ECAD_ECAD_AUTO_INSTALL: "off" }), "off");
   assert.equal(runtimeInstallMode({}), "ask");
 });
 

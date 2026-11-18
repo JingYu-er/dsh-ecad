@@ -150,7 +150,7 @@ def action_move(board, payload):
     fp.position = Vector2(x, y)
     board.begin_commit()
     board.update_items([fp])
-    board.push_commit("dsh-stm32: 移动 " + ref)
+    board.push_commit("dsh-ecad: 移动 " + ref)
     return {"planned": planned, "applied": True}
 
 
@@ -192,7 +192,7 @@ def action_route(board, payload):
         tracks.append(track)
     board.begin_commit()
     board.create_items(tracks)
-    board.push_commit("dsh-stm32: 布线 " + str(len(tracks)) + " 段")
+    board.push_commit("dsh-ecad: 布线 " + str(len(tracks)) + " 段")
     return {"planned": planned, "applied": True}
 
 
@@ -215,7 +215,7 @@ def action_via(board, payload):
         via.net = net
     board.begin_commit()
     board.create_items([via])
-    board.push_commit("dsh-stm32: 加过孔")
+    board.push_commit("dsh-ecad: 加过孔")
     return {"planned": planned, "applied": True}
 
 

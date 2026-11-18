@@ -4,7 +4,7 @@
 // 用法：node scripts/facts/extract-rm-facts.mjs --pdf <rm.pdf> --spec <topics.json>
 //         --svd-root <dir> [--out <file>]
 //
-// 页面文本来自 pymupdf（DSH_STM32_PYTHON 覆盖解释器，默认 python）。pymupdf 不可用时
+// 页面文本来自 pymupdf（DSH_ECAD_PYTHON 覆盖解释器，默认 python）。pymupdf 不可用时
 // 明确失败：引文必须来自「被核验的那一份文本」，不能拿插件里的自研抽取器凑数
 // （Node 侧压平索引没有页边界，做不了 page±3 回查；它负责的是覆盖判定那一层）。
 //
@@ -45,7 +45,7 @@ const pages = new Set();
 for (const topic of spec.topics) {
   for (let n = Math.max(1, topic.page - 3); n <= topic.page + 3; n += 1) pages.add(n);
 }
-const py = process.env.DSH_STM32_PYTHON || "python";
+const py = process.env.DSH_ECAD_PYTHON || "python";
 const pyCode = [
   "import json, sys",
   "import pymupdf",
@@ -62,7 +62,7 @@ const r = spawnSync(py, ["-c", pyCode, resolve(args.pdf), [...pages].sort((a, b)
 if (r.status !== 0) {
   const lastLine = String(r.stderr || "").split("\n").filter(Boolean).pop() || ("退出码 " + String(r.status));
   console.error("pymupdf 抽文本失败（" + py + "）：" + lastLine.slice(0, 200));
-  console.error("提示：给这个解释器装 pymupdf，或用 DSH_STM32_PYTHON 指定一个装了它的解释器。");
+  console.error("提示：给这个解释器装 pymupdf，或用 DSH_ECAD_PYTHON 指定一个装了它的解释器。");
   process.exit(2);
 }
 let pageTexts;

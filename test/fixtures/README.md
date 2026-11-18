@@ -21,5 +21,5 @@
 
 需要真板子或真 CubeMX 的 e2e（`test/e2e-*.mjs`）不吃这套夹具，它们用环境变量指路：
 
-- `DSH_STM32_E2E_PROJECT`：一个可编译、可烧录的 STM32 工程（默认 `fixtures/project`，但那个不能烧）；
-- `DSH_STM32_E2E_ROOT`：放临时副本的目录（默认系统临时目录）。
+- `DSH_ECAD_E2E_PROJECT`：一个可编译、可烧录的 STM32 工程（默认 `fixtures/project`，但那个不能烧）；
+- `DSH_ECAD_E2E_ROOT`：放临时副本的目录（默认系统临时目录）。

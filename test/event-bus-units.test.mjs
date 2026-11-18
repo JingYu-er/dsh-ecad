@@ -111,7 +111,7 @@ test("会话键参与证据目录路径，非法字符被归一", () => {
   assert.ok(dir.endsWith(join("2026-11-12", "sess-1")), dir);
   setEventSessionKey("sess-1");
   assert.equal(eventSessionKey(), "sess-1");
-  const env = { DSH_STM32_EVIDENCE: "D:/custom" };
+  const env = { DSH_ECAD_EVIDENCE: "D:/custom" };
   assert.ok(evidenceRoot(env).replace(/\\/gu, "/").endsWith("D:/custom"));
 });
 
@@ -369,15 +369,15 @@ test("事件流：带 session 时只补发并只推送本会话事件", () => {
 });
 
 test("evidencePolicy：默认值、环境变量夹取、配置文件生效（S78）", () => {
-  const plain = evidencePolicy({ DSH_STM32_NO_CONFIG: "1" });
+  const plain = evidencePolicy({ DSH_ECAD_NO_CONFIG: "1" });
   assert.deepEqual([plain.flushSeconds, plain.keepDays, plain.keepSessions], [30, 7, 20], "默认 30 秒 / 7 天 / 20 会话");
   assert.match(plain.sources.flushSeconds, /default/u);
 
   const clamped = evidencePolicy({
-    DSH_STM32_NO_CONFIG: "1",
-    DSH_STM32_EVIDENCE_FLUSH_SECONDS: "1",
-    DSH_STM32_EVIDENCE_KEEP_DAYS: "999",
-    DSH_STM32_EVIDENCE_KEEP_SESSIONS: "0",
+    DSH_ECAD_NO_CONFIG: "1",
+    DSH_ECAD_EVIDENCE_FLUSH_SECONDS: "1",
+    DSH_ECAD_EVIDENCE_KEEP_DAYS: "999",
+    DSH_ECAD_EVIDENCE_KEEP_SESSIONS: "0",
   });
   assert.deepEqual([clamped.flushSeconds, clamped.keepDays, clamped.keepSessions], [5, 365, 1], "越界夹到允许范围");
   assert.match(clamped.sources.keepDays, /^env /u);
@@ -385,11 +385,11 @@ test("evidencePolicy：默认值、环境变量夹取、配置文件生效（S78
   const dir = mkdtempSync(join(tmpdir(), "evp-"));
   const configPath = join(dir, "config.json");
   writeFileSync(configPath, JSON.stringify({ evidenceFlushSeconds: 10, evidenceKeepDays: 3, evidenceKeepSessions: 5 }), "utf8");
-  const fromConfig = evidencePolicy({ DSH_STM32_CONFIG: configPath });
+  const fromConfig = evidencePolicy({ DSH_ECAD_CONFIG: configPath });
   assert.deepEqual([fromConfig.flushSeconds, fromConfig.keepDays, fromConfig.keepSessions], [10, 3, 5], "配置文件里的三项生效");
   assert.match(fromConfig.sources.flushSeconds, /^config /u);
 
-  const envWins = evidencePolicy({ DSH_STM32_CONFIG: configPath, DSH_STM32_EVIDENCE_FLUSH_SECONDS: "20" });
+  const envWins = evidencePolicy({ DSH_ECAD_CONFIG: configPath, DSH_ECAD_EVIDENCE_FLUSH_SECONDS: "20" });
   assert.equal(envWins.flushSeconds, 20, "环境变量优先于配置文件");
   assert.equal(envWins.keepDays, 3, "未覆盖的项仍取配置文件");
 });

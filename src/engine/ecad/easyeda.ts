@@ -348,7 +348,7 @@ export function easyedaToKicadMod(
   const lines: string[] = [];
   lines.push("(footprint \"" + name + "\"");
   lines.push("  (version 20241229)");
-  lines.push("  (generator \"dsh-stm32\")");
+  lines.push("  (generator \"dsh-ecad\")");
   lines.push("  (layer \"F.Cu\")");
   if (pkg.mpn !== "") lines.push("  (descr \"" + pkg.mpn.replace(/"/gu, "'") + "\")");
   lines.push("  (attr smd)");
@@ -480,7 +480,7 @@ export async function fetchEasyedaPackage(
   options.signal?.addEventListener("abort", abort, { once: true });
   try {
     const response = await doFetch(EASYEDA_PRODUCT_URL(clean), {
-      headers: { "user-agent": "dsh-stm32", accept: "application/json" },
+      headers: { "user-agent": "dsh-ecad", accept: "application/json" },
       signal: controller.signal,
     });
     if (!response.ok) {

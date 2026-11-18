@@ -121,7 +121,7 @@ export interface PcbIpcOptions {
 
 /** 脚本落盘目录：每个进程第一次调用时写一次，内容变了才重写。 */
 export function ipcScriptPath(): string {
-  return join(tmpdir(), "dsh-stm32-ipc", "pcb_ipc.py");
+  return join(tmpdir(), "dsh-ecad-ipc", "pcb_ipc.py");
 }
 
 export function ensureIpcScript(): { path: string; error: string } {
@@ -167,7 +167,7 @@ export async function runPcbIpc(options: PcbIpcOptions, request: PcbIpcRequest):
   if (script.error !== "") {
     return { ok: false, kind: "INTERNAL", error: "写不出 IPC 脚本：" + script.error, data: {}, script: script.path };
   }
-  const payloadPath = join(tmpdir(), "dsh-stm32-ipc", "payload-" + process.pid + "-" + Date.now() + ".json");
+  const payloadPath = join(tmpdir(), "dsh-ecad-ipc", "payload-" + process.pid + "-" + Date.now() + ".json");
   try {
     writeFileSync(payloadPath, JSON.stringify({ ...request, timeoutMs: request.timeoutMs ?? options.timeoutMs ?? 30000 }), "utf8");
   } catch (error) {

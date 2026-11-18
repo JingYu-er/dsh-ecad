@@ -16,7 +16,7 @@ import {
   resolveDatasheetRef,
 } from "../lib/engine/datasheet/store.js";
 
-process.env["DSH_STM32_DS_MIN_GAP_MS"] = "0";
+process.env["DSH_ECAD_DS_MIN_GAP_MS"] = "0";
 
 const PDF = Buffer.from("%PDF-1.5\n1 0 obj\n<<>>\nendobj\n%%EOF\n", "latin1");
 

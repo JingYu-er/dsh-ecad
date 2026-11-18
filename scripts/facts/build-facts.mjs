@@ -14,7 +14,7 @@
 // 不做 PDF 解析（那是下一项工作）。缺语义 → facts.needs 写明缺什么，flash/doctor 自动只读降级。
 // RM 载体默认自动取（--rm-auto auto）：先 ST 官方 sitemap（132 条英文 reference_manual 直链，
 // 按族匹配 + 下载后逐线覆盖验证），失败退 stmcu.com.cn 中国官网（分类页→详情页→CCC 直链，
-// zh→en 换英文版）；两路都挂只降级不拦语义。off/DSH_STM32_OFFLINE=1/--no-network 不联网。
+// zh→en 换英文版）；两路都挂只降级不拦语义。off/DSH_ECAD_OFFLINE=1/--no-network 不联网。
 // --rm-lines 声明这份 rm-facts 适用哪些线（RM 按线分级：RM0490 只覆盖 STM32C0x1=C011/C031）；
 // 目标线不在其中时语义一律拒收，只留结构。rm-facts 自带 doc.lines 时可以不传。
 import { buildFacts } from "../../lib/engine/facts-acquire.js";

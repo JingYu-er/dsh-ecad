@@ -131,7 +131,7 @@ async function fetchPrice(code: string, options: PriceOptions): Promise<Omit<Pri
     const response = await fetchImpl(lcscDetailUrl(code), {
       signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
       redirect: "follow",
-      headers: { "user-agent": "dsh-stm32 bom price fetcher (lcsc product page)" },
+      headers: { "user-agent": "dsh-ecad bom price fetcher (lcsc product page)" },
     });
     if (!response.ok) return null;
     return parseLcscPrice(await response.text());

@@ -47,7 +47,6 @@ const suites = [
   "fault-hints-units.test.mjs",
   "pcb-units.test.mjs",
   "pdf-units.test.mjs",
-  "pinout-render-units.test.mjs",
   "pinout-units.test.mjs",
   "project-conf-units.test.mjs",
   "project-layout-units.test.mjs",
@@ -141,7 +140,7 @@ for (const name of suites) {
       stdio: ["ignore", "pipe", "pipe"],
       // 单测不许受开发机上真实存在的 ~/.dsh-stm32/config.json 影响（装了工具链的机器上
       // search-roots 的"默认候选"断言会因此变红）；toolchain-units 自己会清掉这个变量再测配置读取。
-      env: { ...process.env, DSH_STM32_NO_CONFIG: "1", DSH_STM32_HOME: memoHome },
+      env: { ...process.env, DSH_ECAD_NO_CONFIG: "1", DSH_ECAD_HOME: memoHome },
     });
   } catch (error) {
     out = String(error.stdout ?? "") + String(error.stderr ?? "");

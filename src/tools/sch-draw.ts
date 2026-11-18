@@ -415,8 +415,8 @@ export function registerSchDrawTools(ctx: DshContext): void {
 
       backupBoardFile(plan.boardFile);
       const stamp = String(Date.now());
-      const scriptFile = join(tmpdir(), "dsh-stm32-handsync-" + stamp + ".py");
-      const resultFile = join(tmpdir(), "dsh-stm32-handsync-" + stamp + ".json");
+      const scriptFile = join(tmpdir(), "dsh-ecad-handsync-" + stamp + ".py");
+      const resultFile = join(tmpdir(), "dsh-ecad-handsync-" + stamp + ".json");
       writeFileSync(scriptFile, buildHandSyncScript(plan), "utf8");
       const payload = JSON.stringify({
         boardFile: plan.boardFile,

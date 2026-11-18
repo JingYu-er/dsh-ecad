@@ -297,7 +297,7 @@ function pinLabelsFor(part: ImportedPart): string {
 /** 生成新的 circuit.tsx：元件清单与网络来自 KiCad；坐标不写，构建时重排。 */
 export function renderCircuitSource(state: ImportState): string {
   const lines: string[] = [];
-  lines.push("// 由 dsh-stm32 从 KiCad 工程吸收（S172）。");
+  lines.push("// 由 dsh-ecad 从 KiCad 工程吸收（S172）。");
   lines.push("// 元件与网络以 KiCad 为准；坐标与画法不保留，构建时会重新排布。");
   lines.push("export default () => (");
   const size = state.widthMm > 0 && state.heightMm > 0 ? ' width="' + String(state.widthMm) + 'mm" height="' + String(state.heightMm) + 'mm"' : "";

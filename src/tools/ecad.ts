@@ -34,6 +34,7 @@ import {
 import { resolveProjectDir } from "./project-dir.js";
 import { resolveProjectLayout } from "../engine/project-layout.js";
 import type { DshContext, JsonSchema, ToolExec } from "../types.js";
+import { envValue } from "../engine/env-compat.js";
 
 export const ECAD_INIT_TOOL = "stm32_ecad_init";
 export const ECAD_DESIGN_TOOL = "stm32_ecad_design";
@@ -342,7 +343,7 @@ export function registerEcadTools(ctx: DshContext): void {
       // 构建成功就把本次用到的器件手册补齐：后面读引脚、电气参数、时序都要靠它（S120）。
       if (built.ok) {
         const ds = await ensureProjectDatasheets(project.dir, {
-          offline: (process.env["DSH_STM32_OFFLINE"] ?? "").trim() === "1",
+          offline: (envValue(process.env, "OFFLINE") ?? "").trim() === "1",
           signal: exec.signal,
         });
         if (ds.codes.length > 0) {

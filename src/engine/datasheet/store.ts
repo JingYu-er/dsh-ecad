@@ -23,6 +23,7 @@ import { join } from "node:path";
 
 import { fetchLcscProduct, type LcscOptions, type LcscProduct } from "./lcsc.js";
 import { ecadHome } from "../ecad-home.js";
+import { envValue } from "../env-compat.js";
 
 /** 缓存条目：一份手册的全部事实。 */
 export interface DatasheetEntry {
@@ -51,9 +52,9 @@ const DEFAULT_GAP_MS = 1500;
 
 let lastRequestAt = 0;
 
-/** 缓存根目录：`DSH_STM32_DATASHEETS` 优先，否则 `~/.dsh-stm32/datasheets`。 */
+/** 缓存根目录：`DSH_ECAD_DATASHEETS` 优先，否则 `~/.dsh-stm32/datasheets`。 */
 export function datasheetCacheDir(env: Record<string, string | undefined> = process.env): string {
-  const explicit = (env["DSH_STM32_DATASHEETS"] ?? "").trim();
+  const explicit = (envValue(env, "DATASHEETS") ?? "").trim();
   if (explicit !== "") return explicit;
   return join(ecadHome(env), "datasheets");
 }
@@ -167,7 +168,7 @@ function clearNegative(cacheDir: string, code: string): void {
 }
 
 function gapMs(): number {
-  const fromEnv = Number.parseInt(process.env["DSH_STM32_DS_MIN_GAP_MS"] ?? "", 10);
+  const fromEnv = Number.parseInt(envValue(process.env, "DS_MIN_GAP_MS") ?? "", 10);
   return Number.isFinite(fromEnv) && fromEnv >= 0 ? fromEnv : DEFAULT_GAP_MS;
 }
 
@@ -210,7 +211,7 @@ export async function ensureDatasheet(codeSpec: string, options: EnsureOptions =
     return { ok: true, cached: true, entry: existing, file: entryFile(cacheDir, existing) };
   }
   if (options.offline ?? false) {
-    return { ok: false, error: "离线模式（DSH_STM32_OFFLINE=1），本地没有 " + code + " 的手册" };
+    return { ok: false, error: "离线模式（DSH_ECAD_OFFLINE=1），本地没有 " + code + " 的手册" };
   }
   if (!(options.refresh ?? false)) {
     const reason = negativeReason(cacheDir, code);
@@ -233,7 +234,7 @@ export async function ensureDatasheet(codeSpec: string, options: EnsureOptions =
     const response = await fetchImpl(page.product.pdfUrl, {
       signal: options.signal === undefined ? controller.signal : AbortSignal.any([controller.signal, options.signal]),
       redirect: "follow",
-      headers: { "user-agent": "dsh-stm32 datasheet fetcher (pdf)" },
+      headers: { "user-agent": "dsh-ecad datasheet fetcher (pdf)" },
     });
     if (!response.ok) {
       const error = "PDF 返回 HTTP " + String(response.status) + "：" + page.product.pdfUrl;

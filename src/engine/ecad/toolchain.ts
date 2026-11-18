@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { envValue } from "../env-compat.js";
 
 export interface EcadToolchain {
   /** KiCad 安装根，例如 `D:/app/KiCad/10.0`。 */
@@ -66,11 +67,11 @@ function firstExisting(paths: readonly string[]): string {
  * 定位 KiCad 与 bun。
  *
  * 顺序：显式环境变量 → 常见安装根下的版本目录 → PATH 里的 bun。
- * 环境变量：`DSH_STM32_KICAD_ROOT`（覆盖安装根）、`DSH_STM32_BUN`（覆盖 bun）。
+ * 环境变量：`DSH_ECAD_KICAD_ROOT`（覆盖安装根）、`DSH_ECAD_BUN`（覆盖 bun）。
  */
 export function locateEcadToolchain(env: Record<string, string | undefined> = process.env): EcadLocateResult {
   const notes: string[] = [];
-  const explicitRoot = (env["DSH_STM32_KICAD_ROOT"] ?? env["KICAD_ROOT"] ?? "").replace(/\\/gu, "/");
+  const explicitRoot = (envValue(env, "KICAD_ROOT") ?? env["KICAD_ROOT"] ?? "").replace(/\\/gu, "/");
 
   const roots: string[] = [];
   if (explicitRoot !== "") {
@@ -92,7 +93,7 @@ export function locateEcadToolchain(env: Record<string, string | undefined> = pr
     ]);
     if (cli === "") continue;
     root = candidate.replace(/\/bin$/u, "");
-    notes.push("KiCad：从 " + (explicitRoot === "" ? "默认安装根" : "DSH_STM32_KICAD_ROOT") + " 找到 " + root);
+    notes.push("KiCad：从 " + (explicitRoot === "" ? "默认安装根" : "DSH_ECAD_KICAD_ROOT") + " 找到 " + root);
     break;
   }
   if (root === "") {
@@ -101,14 +102,14 @@ export function locateEcadToolchain(env: Record<string, string | undefined> = pr
       toolchain: null,
       error:
         "没找到 KiCad：电路设计需要 KiCad 10（kicad-cli / bun / pcbnew）。" +
-        "装法：kicad.org 下载 Windows 10.x 安装包，默认目录会被自动检索；非默认目录用 DSH_STM32_KICAD_ROOT 指向安装根。" +
+        "装法：kicad.org 下载 Windows 10.x 安装包，默认目录会被自动检索；非默认目录用 DSH_ECAD_KICAD_ROOT 指向安装根。" +
         "运行 stm32_doctor 可看到缺件清单与安装方式。",
     };
   }
 
   const binDir = root + "/bin";
   const kicadCli = firstExisting([binDir + "/kicad-cli.exe", binDir + "/kicad-cli"]);
-  const bunExplicit = (env["DSH_STM32_BUN"] ?? "").replace(/\\/gu, "/");
+  const bunExplicit = (envValue(env, "BUN") ?? "").replace(/\\/gu, "/");
   const bun =
     bunExplicit !== "" && existsSync(bunExplicit)
       ? bunExplicit
@@ -121,7 +122,7 @@ export function locateEcadToolchain(env: Record<string, string | undefined> = pr
   const model3dDir = firstExisting([share + "/3dmodels", root + "/share/3dmodels"]);
 
   if (bun === "") {
-    notes.push("bun：未随 KiCad 找到，tscircuit 构建会失败（可用 DSH_STM32_BUN 指定）");
+    notes.push("bun：未随 KiCad 找到，tscircuit 构建会失败（可用 DSH_ECAD_BUN 指定）");
   } else {
     notes.push("bun：" + bun);
   }
@@ -166,7 +167,7 @@ export function locateEcadToolchain(env: Record<string, string | undefined> = pr
   };
 }
 
-/** 子进程环境：在宿主 env 之上叠加工具链变量（不给 DSH_STM32_* 之外的宿主变量做白名单过滤）。 */
+/** 子进程环境：在宿主 env 之上叠加工具链变量（不给 DSH_ECAD_* 之外的宿主变量做白名单过滤）。 */
 export function ecadEnv(
   toolchain: EcadToolchain,
   base: Record<string, string | undefined> = process.env,

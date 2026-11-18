@@ -63,7 +63,7 @@ export async function fetchLcscProduct(code: string, options: LcscOptions = {}):
     const response = await fetchImpl(url, {
       signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
       redirect: "follow",
-      headers: { "user-agent": "dsh-stm32 datasheet fetcher (lcsc product page)" },
+      headers: { "user-agent": "dsh-ecad datasheet fetcher (lcsc product page)" },
     });
     if (!response.ok) {
       return { ok: false, error: "商品页返回 HTTP " + String(response.status) + "：" + url };

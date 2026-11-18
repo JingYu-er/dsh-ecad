@@ -48,12 +48,12 @@ function referenceOf(block: string): string {
   return match === null ? "" : (match[1] ?? "");
 }
 
-/** 把内嵌封装改写成立创库里的单文件：头换成 dsh-stm32 生成，名字用编号。 */
+/** 把内嵌封装改写成立创库里的单文件：头换成 dsh-ecad 生成，名字用编号。 */
 function toModule(block: string, code: string): string {
   const start = block.search(/\(footprint\s/u);
   if (start < 0) return "";
   const rest = block.slice(start);
-  const afterHead = rest.replace(/^\(footprint\s+(?:"[^"]*"|[^\s(]+)/u, "(footprint \"" + code + "\" (version 20240108) (generator \"dsh-stm32\")");
+  const afterHead = rest.replace(/^\(footprint\s+(?:"[^"]*"|[^\s(]+)/u, "(footprint \"" + code + "\" (version 20240108) (generator \"dsh-ecad\")");
   return afterHead;
 }
 

@@ -173,7 +173,7 @@ export function applyLayoutFix(input: string): LayoutFixReport {
         const workspaceRoot = dirname(projectDir);
         const target = action.to;
         const header =
-          "# dsh-stm32 工作区索引：由插件写入，手工增删也可。\n# 一行一个工程，写相对路径或目录名。\nversion=1\n";
+          "# 工作区索引：由插件写入，手工增删也可。\n# 一行一个工程，写相对路径或目录名。\nversion=1\n";
         const existing = existsSync(target) ? readFileSync(target, "utf8").replace(/\s*$/u, "\n") : header;
         const projectRel = relative(workspaceRoot, projectDir).replace(/\\/gu, "/");
         // 工程根里的 project= 指向的是它的子目录（如 fw），那些不是独立工程，挪走后丢弃。

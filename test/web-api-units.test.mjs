@@ -28,8 +28,8 @@ function tempEnv(tag) {
   return {
     dir,
     file: path.join(dir, "config.json"),
-    // 显式构造 env：不能带 DSH_STM32_NO_CONFIG（run-units 会给子进程设它）。
-    env: { DSH_STM32_CONFIG: path.join(dir, "config.json") },
+    // 显式构造 env：不能带 DSH_ECAD_NO_CONFIG（run-units 会给子进程设它）。
+    env: { DSH_ECAD_CONFIG: path.join(dir, "config.json") },
   };
 }
 
@@ -180,7 +180,7 @@ test("工程类接口缺 projectDir 时回 400，不再回落到进程工作目�
   // 隔离备忘文件：否则同一台机器上「最近用过的工程」会让这里变成 200。
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "s84-nomemo-"));
   for (const path of ["ecad/pcb", "ecad/bom", "ecad/links", "ecad/netgate", "ecad/emc"]) {
-    const response = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/" + path, query: {}, deps: { subprocess: fakeSubprocess, env: { DSH_STM32_HOME: home } } });
+    const response = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/" + path, query: {}, deps: { subprocess: fakeSubprocess, env: { DSH_ECAD_HOME: home } } });
     assert.equal(response.status, 400, path + " 缺 projectDir 应回 400");
     assert.match(String(response.body.error), /projectDir 不能为空/u, path + " 的提示要说清缺什么");
   }
@@ -275,7 +275,7 @@ test("GET /status：返回事件计数、会话键与证据目录", async () => 
   const result = await handleWebApi({
     method: "GET",
     path: WEB_API_PREFIX + "/status",
-    deps: { subprocess: fakeSubprocess, env: { DSH_STM32_EVIDENCE: "D:/evidence" } },
+    deps: { subprocess: fakeSubprocess, env: { DSH_ECAD_EVIDENCE: "D:/evidence" } },
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);
@@ -372,7 +372,7 @@ test("GET /evidence 与 /replay：列出证据文件、逐行还原事件、拒�
   const other = path.join(root, "2026-11-12", "sess-b");
   fs.mkdirSync(other, { recursive: true });
   fs.writeFileSync(path.join(other, "events-130000.jsonl"), lines[0] + "\n", "utf8");
-  const deps = { subprocess: fakeSubprocess, env: { DSH_STM32_EVIDENCE: root } };
+  const deps = { subprocess: fakeSubprocess, env: { DSH_ECAD_EVIDENCE: root } };
 
   const listed = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/evidence", query: {}, deps: deps });
   assert.equal(listed.status, 200);
@@ -446,7 +446,7 @@ test("POST /ecad/action：动作名只认八个，其余直接 400", async () =>
 test("POST /ecad/action：package 在没有硬件目录时也认这个动作，只报人话（S107）", async () => {
   const { dir, env } = tempEnv("ecad-package");
   // 打包只读 hardware/：故意把 KiCad 指到一个不存在的目录，动作仍要能返回（CI 上没有 KiCad）。
-  const deps = { subprocess: fakeSubprocess, env: { ...env, DSH_STM32_KICAD_ROOT: path.join(dir, "no-such-kicad") } };
+  const deps = { subprocess: fakeSubprocess, env: { ...env, DSH_ECAD_KICAD_ROOT: path.join(dir, "no-such-kicad") } };
   const packed = await handleWebApi({
     method: "POST",
     path: WEB_API_PREFIX + "/ecad/action",
@@ -462,7 +462,7 @@ test("POST /ecad/action：package 在没有硬件目录时也认这个动作，�
 
 test("POST /ecad/action：datasheets 在没有器件时也认这个动作（S120）", async () => {
   const { dir, env } = tempEnv("ecad-datasheets");
-  const deps = { subprocess: fakeSubprocess, env: { ...env, DSH_STM32_DATASHEETS: path.join(dir, "ds") } };
+  const deps = { subprocess: fakeSubprocess, env: { ...env, DSH_ECAD_DATASHEETS: path.join(dir, "ds") } };
   const result = await handleWebApi({
     method: "POST",
     path: WEB_API_PREFIX + "/ecad/action",
@@ -1011,7 +1011,7 @@ test("GET /ecad/links：差分对、平面层与去耦距离都在报告里，�
 });
 
 test("GET /ecad/render3d：没有 KiCad 工具链就直说，缺 projectDir 时 400（S180）", async () => {
-  const deps = { subprocess: fakeSubprocess, env: { ...process.env, DSH_STM32_BIN_DIRS: "" } };
+  const deps = { subprocess: fakeSubprocess, env: { ...process.env, DSH_ECAD_BIN_DIRS: "" } };
   const bad = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/render3d", query: {}, deps });
   assert.equal(bad.status, 400);
 });
@@ -1194,7 +1194,7 @@ test("GET /schematic/sync：没有手绘层就直说先 seed，缺 projectDir �
 });
 
 test("GET/POST /ecad/swap：缺 ref 与 footprint 时 400，参数齐了没工具链也给人话（S182）", async () => {
-  const deps = { subprocess: fakeSubprocess, env: { ...process.env, DSH_STM32_BIN_DIRS: "" } };
+  const deps = { subprocess: fakeSubprocess, env: { ...process.env, DSH_ECAD_BIN_DIRS: "" } };
   const noProject = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/swap", query: {}, deps });
   assert.equal(noProject.status, 400);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "s182-swap-"));

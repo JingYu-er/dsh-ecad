@@ -141,10 +141,10 @@ function fakeSubprocess(options = {}) {
   };
 }
 
-test("工具链：DSH_STM32_KICAD_ROOT 指到哪就认哪，并注入 3D 模型目录", () => {
+test("工具链：DSH_ECAD_KICAD_ROOT 指到哪就认哪，并注入 3D 模型目录", () => {
   const root = fakeKicadRoot();
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     assert.equal(located.ok, true);
     assert.equal(located.toolchain.root, root.replace(/\\/gu, "/"));
     assert.match(located.toolchain.kicadCli, /bin[\\/]kicad-cli\.exe$/u);
@@ -156,11 +156,11 @@ test("工具链：DSH_STM32_KICAD_ROOT 指到哪就认哪，并注入 3D 模型�
 });
 
 test("工具链：找不到 KiCad 时给可执行的提示，而不是空对象", () => {
-  const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: join(tmpdir(), "definitely-missing-kicad") });
+  const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: join(tmpdir(), "definitely-missing-kicad") });
   assert.equal(located.ok, false);
   assert.equal(located.toolchain, null);
   assert.match(located.error, /没找到 KiCad/u);
-  assert.match(located.error, /DSH_STM32_KICAD_ROOT/u);
+  assert.match(located.error, /DSH_ECAD_KICAD_ROOT/u);
 });
 
 test("工作区：hardware 为空时落到 <工程>/hardware，四个目录名固定", () => {
@@ -218,7 +218,7 @@ test("初始化：建四个目录与最小 package.json，重复调用幂等", (
 test("构建：没初始化时提示先跑 stm32_ecad_init", async () => {
   const project = tempDir("ecad-build-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: fakeKicadRoot() });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: fakeKicadRoot() });
     const workspace = planEcadWorkspace(project, "");
     const built = await runTsciBuild({
       subprocess: fakeSubprocess(),
@@ -236,7 +236,7 @@ test("构建：装了工作区但没装依赖时提示 npm install，不静默�
   const root = fakeKicadRoot();
   const project = tempDir("ecad-build2-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const workspace = planEcadWorkspace(project, "");
     initEcadWorkspace(workspace);
     const built = await runTsciBuild({ subprocess: fakeSubprocess(), toolchain: located.toolchain, workspace });
@@ -252,7 +252,7 @@ test("构建：argv 用 KiCad 自带的 bun 跑本地 cli.mjs，并带 --kicad-p
   const root = fakeKicadRoot();
   const project = tempDir("ecad-build3-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const workspace = planEcadWorkspace(project, "");
     initEcadWorkspace(workspace);
     mkdirSync(join(workspace.circuitDir, "node_modules", "tscircuit"), { recursive: true });
@@ -336,7 +336,7 @@ test("封装预检：同坐标焊盘按 A1/B12 这类成对列出，并驱动降
     assert.equal(pads.length, 5);
     assert.deepEqual(coincidentGroups(pads), [["A1", "B12"], ["A4", "B9"]]);
 
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: fakeKicadRoot() });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: fakeKicadRoot() });
     const workspace = planEcadWorkspace(dir, "");
     initEcadWorkspace(workspace);
     mkdirSync(join(workspace.circuitDir, "node_modules", "tscircuit"), { recursive: true });
@@ -395,7 +395,7 @@ test("ERC：把 sheets[].violations 收敛成 rule/severity/条数", async () =>
   const root = fakeKicadRoot();
   const project = tempDir("ecad-erc-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const schematic = join(project, "board.kicad_sch");
     writeFileSync(schematic, "(kicad_sch (wire (pts (xy 1 1) (xy 2 2))))", "utf8");
     const subprocess = fakeSubprocess({
@@ -428,7 +428,7 @@ test("DRC：violations 与 unconnected_items 一起收，未连接项单独标�
   const root = fakeKicadRoot();
   const project = tempDir("ecad-drc-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const pcb = join(project, "board.kicad_pcb");
     writeFileSync(pcb, "pcb", "utf8");
     const subprocess = fakeSubprocess({
@@ -454,7 +454,7 @@ test("STEP：缺失 3D 模型只报告不阻断，成功时给出字节数", asy
   const root = fakeKicadRoot();
   const project = tempDir("ecad-step-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const pcb = join(project, "board.kicad_pcb");
     writeFileSync(pcb, "pcb", "utf8");
     const outFile = join(project, "out", "board.step");
@@ -582,7 +582,7 @@ test("制造文件导出：Gerber、钻孔、坐标、STEP 一起落盘，顺序
   const root = fakeKicadRoot();
   const project = tempDir("ecad-fab-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const kicadDir = join(project, "kicad");
     mkdirSync(kicadDir, { recursive: true });
     const pcb = join(kicadDir, "board.kicad_pcb");
@@ -625,7 +625,7 @@ test("制造文件导出：Gerber、钻孔、坐标、STEP 一起落盘，顺序
 test("制造文件导出：没有板子时给人话，不跑 kicad-cli（S100）", async () => {
   const root = fakeKicadRoot();
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const subprocess = fakeSubprocess();
     const exported = await exportFabrication(subprocess, located.toolchain, join(root, "missing.kicad_pcb"), join(root, "out"));
     assert.equal(exported.ok, false);
@@ -700,7 +700,7 @@ test("打包：没有 hardware 目录时给人话，不写文件（S107）", () 
 
 test("没装 KiCad 时的报错要给出安装去向（S108）", () => {
   const root = tempDir("ecad-nokicad-");
-  const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: join(root, "missing") });
+  const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: join(root, "missing") });
   assert.equal(located.ok, false);
   assert.match(located.error, /KiCad 10/u);
   assert.match(located.error, /stm32_doctor/u);
@@ -931,7 +931,7 @@ test("没有导线的原理图：未连接类规则降级为提醒并说明（S1
   const root = fakeKicadRoot();
   const project = tempDir("ecad-erc-nowire-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const schematic = join(project, "board.kicad_sch");
     writeFileSync(schematic, "(kicad_sch (symbol (lib_id \"Device:R\")))", "utf8");
     const subprocess = fakeSubprocess({
@@ -960,7 +960,7 @@ test("机器生成的原理图：未连接类规则降级并注明生成器（S1
   const root = fakeKicadRoot();
   const project = tempDir("ecad-erc-gen-");
   try {
-    const located = locateEcadToolchain({ DSH_STM32_KICAD_ROOT: root });
+    const located = locateEcadToolchain({ DSH_ECAD_KICAD_ROOT: root });
     const schematic = join(project, "board.kicad_sch");
     writeFileSync(
       schematic,
@@ -1996,7 +1996,7 @@ test("吸收：diff 只报增删改，写盘前留 .bak，备份失败就不改�
   assert.equal(readFileSync(source, "utf8"), "// 旧源\n");
   const stored = absorbFromKicad(dir, { boardFile: board, sourceFile: source, circuitJsonFile: circuitJson, write: true });
   assert.equal(stored.written, true);
-  assert.ok(readFileSync(source, "utf8").includes("由 dsh-stm32 从 KiCad 工程吸收"));
+  assert.ok(readFileSync(source, "utf8").includes("由 dsh-ecad 从 KiCad 工程吸收"));
   assert.ok(readdirSync(dir).some((name) => name.endsWith(".bak")));
   const diff = diffImport(readImportState(board), readFileSync(circuitJson, "utf8"));
   assert.deepEqual(diff.added, ["D1"]);
@@ -2820,4 +2820,13 @@ test("制造整包：Gerber/CPL/BOM/manifest 都进 zip，STEP 过大时不塞�
   assert.ok(!names.some((name) => name.startsWith("3d/")), "9 MB 的 STEP 不该进包");
   const manifest = readFileSync(join(root, "out", "board-fabrication.zip"));
   assert.ok(manifest.length > 0);
+});
+
+test("环境变量：新名优先，旧名（DSH_STM32_*）仍认（S192）", async () => {
+  const { envValue, ecadEnvName } = await import("../lib/engine/env-compat.js");
+  assert.equal(ecadEnvName("HOME"), "DSH_ECAD_HOME");
+  assert.equal(envValue({ DSH_ECAD_HOME: "D:/a" }, "HOME"), "D:/a");
+  assert.equal(envValue({ DSH_STM32_HOME: "D:/old" }, "HOME"), "D:/old", "旧名要能继续用");
+  assert.equal(envValue({ DSH_ECAD_HOME: "D:/a", DSH_STM32_HOME: "D:/old" }, "HOME"), "D:/a", "新名优先");
+  assert.equal(envValue({}, "HOME"), undefined);
 });

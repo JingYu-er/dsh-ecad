@@ -87,7 +87,7 @@ export function buildSymbol(spec: SymbolSpec): SymbolResult {
     const out: string[] = [
       "(kicad_symbol_lib",
       "  (version 20241209)",
-      '  (generator "dsh-stm32")',
+      '  (generator "dsh-ecad")',
       '  (symbol "' + text(spec.name) + '"',
       "    (pin_names (offset 0.508))",
       "    (exclude_from_sim no)",

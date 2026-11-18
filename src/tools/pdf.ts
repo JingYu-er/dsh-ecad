@@ -20,6 +20,7 @@ import { extractPdfTables, extractPdfText, listFigures, readPdfCurves, readPdfIn
 import { locatePoppler } from "../engine/pdf/toolchain.js";
 import { datasheetCacheDir, resolveDatasheetRef } from "../engine/datasheet/store.js";
 import { jsonSafe } from "../engine/json-safe.js";
+import { envValue } from "../engine/env-compat.js";
 
 export const PDF_READ_TOOL = "ecad_pdf_read";
 
@@ -174,7 +175,7 @@ const outputSchema: JsonSchema = {
 
 export function popplerDirs(): string[] {
   const config = resolveSearchConfig(process.env);
-  const extra = (process.env["DSH_STM32_BIN_DIRS"] ?? "")
+  const extra = (envValue(process.env, "BIN_DIRS") ?? "")
     .split(";")
     .map((dir) => dir.trim())
     .filter((dir) => dir !== "");

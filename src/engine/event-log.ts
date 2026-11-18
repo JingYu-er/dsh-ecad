@@ -23,6 +23,7 @@ import {
   type DebugEvent,
 } from "./event-bus.js";
 import { ecadHome } from "./ecad-home.js";
+import { envValue } from "./env-compat.js";
 
 /** 默认落盘间隔。一批之内的事件共用一个文件。 */
 export const EVENT_LOG_INTERVAL_MS = 30_000;
@@ -49,7 +50,7 @@ const POLICY_LIMITS = {
 } as const;
 
 function readPolicyConfig(env: NodeJS.ProcessEnv): Record<string, unknown> | null {
-  const flag = env["DSH_STM32_NO_CONFIG"];
+  const flag = envValue(env, "NO_CONFIG");
   if (flag === "1" || flag === "true") return null;
   try {
     const text = readFileSync(toolchainConfigPath(env), "utf8");
@@ -89,9 +90,9 @@ function pickNumber(
  */
 export function evidencePolicy(env: NodeJS.ProcessEnv = process.env): EvidencePolicy {
   const config = readPolicyConfig(env);
-  const flush = pickNumber("flushSeconds", "DSH_STM32_EVIDENCE_FLUSH_SECONDS", env, config);
-  const days = pickNumber("keepDays", "DSH_STM32_EVIDENCE_KEEP_DAYS", env, config);
-  const sessions = pickNumber("keepSessions", "DSH_STM32_EVIDENCE_KEEP_SESSIONS", env, config);
+  const flush = pickNumber("flushSeconds", "DSH_ECAD_EVIDENCE_FLUSH_SECONDS", env, config);
+  const days = pickNumber("keepDays", "DSH_ECAD_EVIDENCE_KEEP_DAYS", env, config);
+  const sessions = pickNumber("keepSessions", "DSH_ECAD_EVIDENCE_KEEP_SESSIONS", env, config);
   return {
     flushSeconds: flush.value,
     keepDays: days.value,
@@ -102,7 +103,7 @@ export function evidencePolicy(env: NodeJS.ProcessEnv = process.env): EvidencePo
 
 /** 证据目录根：允许用环境变量改到别处（例如放到工程内便于随工程归档）。 */
 export function evidenceRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const custom = env.DSH_STM32_EVIDENCE;
+  const custom = envValue(env, "EVIDENCE");
   if (typeof custom === "string" && custom.trim() !== "") return path.resolve(custom.trim());
   return path.join(ecadHome(), "evidence");
 }
