@@ -639,7 +639,7 @@ export function registerEcadTools(ctx: DshContext): void {
     },
     timeoutMs: 60_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; bundle?: boolean }, exec: ToolExec) => {
       const blank = { ok: false, error: "", footprints: [], symbols: [], fpLibTable: "", symLibTable: "", notes: [] as string[] };
       const project = await projectDirOf(ctx, args.projectDir, exec);
       if (!project.ok) return { ...blank, error: project.error };
@@ -669,6 +669,7 @@ export function registerEcadTools(ctx: DshContext): void {
       additionalProperties: false,
       properties: {
         projectDir: { type: "string", description: "工程根目录；缺省为会话工作目录。" },
+        bundle: { type: "boolean", description: "另打一个整包 zip（Gerber + 钻孔 + CPL + BOM + manifest.txt），放在 out/ 下。板厂与 SMT 厂要「一次给全」时用。" },
       },
       required: [],
     },
@@ -688,9 +689,12 @@ export function registerEcadTools(ctx: DshContext): void {
           cplFile: { type: "string", description: "平移到板左下角、Y 向上的贴片坐标；读不到板框时为空。" },
           cplCount: { type: "number" },
           drillFiles: { type: "array", items: fileSizeSchema },
+          bundleFile: { type: "string" },
+          bundleBytes: { type: "number" },
+          bundleFiles: { type: "number" },
           notes: { type: "array", items: { type: "string" } },
         },
-        required: ["ok", "error", "outDir", "gerberDir", "gerbers", "stepFile", "stepBytes", "posFile", "cplFile", "cplCount", "drillFiles", "notes"],
+        required: ["ok", "error", "outDir", "gerberDir", "gerbers", "stepFile", "stepBytes", "posFile", "cplFile", "cplCount", "drillFiles", "bundleFile", "bundleBytes", "bundleFiles", "notes"],
       },
       render: (_args, value) => {
         const result = value as {
@@ -705,6 +709,9 @@ export function registerEcadTools(ctx: DshContext): void {
           cplFile: string;
           cplCount: number;
           drillFiles: { name: string; bytes: number }[];
+          bundleFile: string;
+          bundleBytes: number;
+          bundleFiles: number;
           notes: string[];
         };
         if (!result.ok) return [{ type: "text", text: "导出失败：" + result.error }];
@@ -717,13 +724,16 @@ export function registerEcadTools(ctx: DshContext): void {
             ? "CPL：未生成（原样保留 pos.csv）"
             : "CPL：" + result.cplFile + "（" + String(result.cplCount) + " 个元件，原点在板左下角、Y 向上）",
         ];
+        if (result.bundleFile !== "") {
+          lines.push("整包：" + result.bundleFile + "（" + String(Math.round(result.bundleBytes / 1024)) + " KB，" + String(result.bundleFiles) + " 个文件）");
+        }
         for (const note of result.notes) lines.push("- " + note);
         return [{ type: "text", text: lines.join("\n") }];
       },
     },
     timeoutMs: 330_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; bundle?: boolean }, exec: ToolExec) => {
       const blank = {
         ok: false,
         error: "",
@@ -736,6 +746,9 @@ export function registerEcadTools(ctx: DshContext): void {
         cplFile: "",
         cplCount: 0,
         drillFiles: [] as { name: string; bytes: number }[],
+        bundleFile: "",
+        bundleBytes: 0,
+        bundleFiles: 0,
         notes: [] as string[],
       };
       const project = await projectDirOf(ctx, args.projectDir, exec);
@@ -746,7 +759,9 @@ export function registerEcadTools(ctx: DshContext): void {
       const { findLatestKicadBuild } = await import("../engine/ecad/tsci.js");
       const latest = findLatestKicadBuild(workspace);
       if (!latest.ok) return { ...blank, error: latest.error };
-      const exported = await exportFabrication(ctx.subprocess, located.toolchain, latest.pcbFile, workspace.outDir, exec.signal);
+      const exported = await exportFabrication(ctx.subprocess, located.toolchain, latest.pcbFile, workspace.outDir, exec.signal, {
+        bundle: args.bundle === true,
+      });
       return {
         ok: exported.ok,
         error: exported.error,
@@ -759,6 +774,9 @@ export function registerEcadTools(ctx: DshContext): void {
         cplFile: exported.cplFile,
         cplCount: exported.cplCount,
         drillFiles: exported.drillFiles.map((item) => ({ name: item.name, bytes: item.bytes })),
+        bundleFile: exported.bundleFile,
+        bundleBytes: exported.bundleBytes,
+        bundleFiles: exported.bundleFiles,
         notes: [...exported.notes],
       };
     },

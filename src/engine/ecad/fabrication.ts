@@ -15,6 +15,8 @@ import { exportStep } from "./checks.js";
 import { readBoardBox } from "./dfm.js";
 import { fillZones } from "./pcb/zone-fill.js";
 import { normalizePosCsv } from "./pcb/pos.js";
+import { createZip, type ZipEntry } from "./zip.js";
+import { readBom, renderBomCsv } from "./bom.js";
 
 export interface FabricationFile {
   readonly name: string;
@@ -34,6 +36,10 @@ export interface FabricationExport {
   readonly cplFile: string;
   readonly cplCount: number;
   readonly drillFiles: readonly FabricationFile[];
+  /** 一次下厂用的整包（Gerber + 钻孔 + CPL + BOM + 清单）。未要 bundle 时为空串。 */
+  readonly bundleFile: string;
+  readonly bundleBytes: number;
+  readonly bundleFiles: number;
   readonly notes: readonly string[];
 }
 
@@ -87,6 +93,7 @@ export async function exportFabrication(
   pcbFile: string,
   outDir: string,
   signal?: AbortSignal,
+  options?: { readonly bundle?: boolean },
 ): Promise<FabricationExport> {
   const empty: FabricationExport = {
     ok: false,
@@ -100,6 +107,9 @@ export async function exportFabrication(
     cplFile: "",
     cplCount: 0,
     drillFiles: [],
+    bundleFile: "",
+    bundleBytes: 0,
+    bundleFiles: 0,
     notes: [],
   };
   if (toolchain.kicadCli === "") return { ...empty, error: "没有 kicad-cli：装一个 KiCad 10" };
@@ -171,6 +181,23 @@ export async function exportFabrication(
 
   const gerbers_list = listFiles(gerberDir);
   if (gerbers_list.length === 0) notes.push("Gerber 目录是空的：检查板子是否已经铺铜/布线");
+
+  // 整包（S190）：一个 zip 里放 Gerber、钻孔、CPL、BOM 与清单。SMT 厂与打样厂要的是「一次给全」。
+  let bundleFile = "";
+  let bundleBytes = 0;
+  let bundleFiles = 0;
+  if (options?.bundle === true && gerbers_list.length > 0) {
+    const bundle = writeFabricationBundle({ pcbFile, board, outDir, gerberDir, files: gerbers_list, cplFile, stepFile: step.stepFile, stepBytes: step.bytes, notes });
+    if (bundle.ok) {
+      bundleFile = bundle.file;
+      bundleBytes = bundle.bytes;
+      bundleFiles = bundle.files;
+      notes.push("整包已生成：" + bundle.file + "（" + String(bundle.files) + " 个文件）");
+    } else {
+      notes.push("整包没生成：" + bundle.error);
+    }
+  }
+
   return {
     ok: true,
     error: "",
@@ -183,6 +210,94 @@ export async function exportFabrication(
     cplFile,
     cplCount,
     drillFiles,
+    bundleFile,
+    bundleBytes,
+    bundleFiles,
     notes,
   };
+}
+
+export interface BundleInput {
+  readonly pcbFile: string;
+  readonly board: string;
+  readonly outDir: string;
+  readonly gerberDir: string;
+  readonly files: readonly FabricationFile[];
+  readonly cplFile: string;
+  readonly stepFile: string;
+  readonly stepBytes: number;
+  readonly notes: readonly string[];
+}
+
+/**
+ * 把一次导出打成一个 zip。
+ *
+ * 目录结构照工厂习惯：`gerbers/` 放 Gerber 与钻孔（有些厂要求放一起），`cpl/` 放贴片坐标，
+ * `bom.csv` 放元件清单，`manifest.txt` 写清楚每个文件的字节数与导出说明。
+ * 3D 的 STEP 大于 8 MB 时不塞进来——它是给机械的，不是给板厂的。
+ */
+export function writeFabricationBundle(input: BundleInput): { ok: boolean; error: string; file: string; bytes: number; files: number } {
+  const entries: ZipEntry[] = [];
+  const lines: string[] = [];
+  lines.push("板子：" + input.pcbFile);
+  lines.push("导出目录：" + input.outDir);
+  lines.push("");
+  for (const file of input.files) {
+    try {
+      entries.push({ name: "gerbers/" + file.name, data: readFileSync(join(input.gerberDir, file.name)) });
+      lines.push("gerbers/" + file.name + "  " + String(file.bytes) + " B");
+    } catch (error) {
+      lines.push("gerbers/" + file.name + "  读失败：" + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+  if (input.cplFile !== "") {
+    try {
+      const name = input.cplFile.split(/[\\/]/u).pop() ?? "board-cpl.csv";
+      entries.push({ name: "cpl/" + name, data: readFileSync(input.cplFile) });
+      lines.push("cpl/" + name + "  " + String(statSync(input.cplFile).size) + " B");
+    } catch (error) {
+      lines.push("cpl 读失败：" + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+  // BOM 可能没有 circuit.json（手工板）：有就带上，没有就明说。
+  const circuitCandidates = [join(input.outDir, "..", "circuit.json"), join(input.outDir, "circuit.json")];
+  const circuit = circuitCandidates.find((item) => existsSync(item)) ?? "";
+  if (circuit !== "") {
+    try {
+      const report = readBom(circuit);
+      if (report.ok && report.lines.length > 0) {
+        entries.push({ name: "bom.csv", data: Buffer.from(renderBomCsv(report), "utf8") });
+        lines.push("bom.csv  " + String(report.lines.length) + " 行 / " + String(report.componentCount) + " 个元件");
+      } else {
+        lines.push("bom.csv  没生成：" + (report.ok ? "清单为空" : report.error));
+      }
+    } catch (error) {
+      lines.push("bom.csv  读失败：" + (error instanceof Error ? error.message : String(error)));
+    }
+  } else {
+    lines.push("bom.csv  跳过：导出目录附近没有 circuit.json（手工画的板子没有 BOM 源）");
+  }
+  if (input.stepBytes > 0 && input.stepBytes <= 8 * 1024 * 1024) {
+    try {
+      entries.push({ name: "3d/" + (input.stepFile.split(/[\\/]/u).pop() ?? "board.step"), data: readFileSync(input.stepFile) });
+      lines.push("3d/" + (input.stepFile.split(/[\\/]/u).pop() ?? "board.step") + "  " + String(input.stepBytes) + " B");
+    } catch {
+      lines.push("3d STEP 读失败，未进包");
+    }
+  } else if (input.stepBytes > 8 * 1024 * 1024) {
+    lines.push("3d STEP 超过 8 MB，未进包（机械用，板厂不需要）");
+  }
+  lines.push("");
+  lines.push("导出说明：");
+  for (const note of input.notes) lines.push("- " + note);
+  entries.unshift({ name: "manifest.txt", data: Buffer.from(lines.join("\n") + "\n", "utf8") });
+
+  const file = join(input.outDir, input.board + "-fabrication.zip");
+  try {
+    const data = createZip(entries);
+    writeFileSync(file, data);
+    return { ok: true, error: "", file, bytes: data.length, files: entries.length };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error), file: "", bytes: 0, files: 0 };
+  }
 }

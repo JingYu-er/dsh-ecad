@@ -70,7 +70,7 @@ dsh plugin --profile desktop add dsh-ecad
 | `stm32_ecad_check` | 对生成的 KiCad 工程跑 ERC 与 DRC，收敛成清单（含 `notes` 与 DFM） |
 | `stm32_ecad_libs` | 把板与图里内嵌的封装/符号抽成 `hardware/libs` 下的真库并登记库表 |
 | `stm32_ecad_design` | 九步流水线：预检 → 构建 → 合并焊盘 → 导库 → ERC → DRC → 可制造性 → STEP → 制造文件（可选布线） |
-| `stm32_ecad_step` / `stm32_ecad_export` / `stm32_ecad_package` | 导 STEP；导 Gerber/钻孔/贴片坐标（导出前用 pcbnew 真重铺覆铜，CPL 平移到板框左下角、Y 向上）；打包交付 zip（含自检） |
+| `stm32_ecad_step` / `stm32_ecad_export` / `stm32_ecad_package` | 导 STEP；导 Gerber/钻孔/贴片坐标（导出前用 pcbnew 真重铺覆铜，CPL 平移到板框左下角、Y 向上），加 `bundle: true` 另打一个整包 zip（Gerber + 钻孔 + CPL + BOM + manifest）；打包交付 zip（含自检） |
 | `ecad_layout_fix` | 检查并把 `.dsh-stm32/workspace.conf`、`dsh-stm32.conf` 归位 |
 
 ### 原理图

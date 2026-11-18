@@ -31,7 +31,7 @@ import { checkDfm, estimateCost, readBoardFacts, renderDru, writeDru } from "../
 import { normalizeKicadProject, normalizePcbFootprintNames, readCanonicalFootprints } from "../lib/engine/ecad/normalize.js";
 import { parseJlcpcbFootprints, vendorJlcpcbFootprints } from "../lib/engine/ecad/jlcpcb.js";
 import { collectModelPaths, prepareModels3d, resolveModels, rewriteModelPaths } from "../lib/engine/ecad/models3d.js";
-import { exportFabrication } from "../lib/engine/ecad/fabrication.js";
+import { exportFabrication, writeFabricationBundle } from "../lib/engine/ecad/fabrication.js";
 import { FAB_RULE_FLOOR, countCopperLayers, ensureDesignRules, fabFloorForLayers } from "../lib/engine/ecad/pcb/rules.js";
 import { jsonSafe } from "../lib/engine/json-safe.js";
 import { normalizePosCsv } from "../lib/engine/ecad/pcb/pos.js";
@@ -2801,4 +2801,46 @@ test("铺铜填充：脚本用 ZONE_FILLER 并落盘，结果只认最后一行 
   assert.equal(parsed.zones, 2);
   assert.equal(parsed.filled, true);
   assert.equal(parseZoneFillOutput("no json here").ok, false);
+});
+
+test("制造整包：Gerber/CPL/BOM/manifest 都进 zip，STEP 过大时不塞（S190）", () => {
+  const root = mkdtempSync(join(tmpdir(), "dsh-bundle-"));
+  const gerberDir = join(root, "out", "gerbers");
+  mkdirSync(gerberDir, { recursive: true });
+  writeFileSync(join(gerberDir, "board-F_Cu.gtl"), "G04 top*\n", "utf8");
+  writeFileSync(join(gerberDir, "board-Edge_Cuts.gm1"), "G04 edge*\n", "utf8");
+  const cplFile = join(root, "out", "board-cpl.csv");
+  writeFileSync(cplFile, "Ref,Val,Package,X,Y,Rot,Side\nR1,10k,0402,10,20,0,top\n", "utf8");
+  const circuitFile = join(root, "circuit.json");
+  writeFileSync(
+    circuitFile,
+    JSON.stringify([
+      { type: "source_component", source_component_id: "sc0", ftype: "simple_resistor", name: "R1", resistance: "10k", supplier_part_numbers: { jlcpcb: ["C1"] } },
+      { type: "cad_component", source_component_id: "sc0", model_step_url: "https://kicad-mod-cache.tscircuit.com/Resistor_SMD/R_0402_1005Metric.step" },
+    ]),
+    "utf8",
+  );
+  const bundle = writeFabricationBundle({
+    pcbFile: join(root, "board.kicad_pcb"),
+    board: "board",
+    outDir: join(root, "out"),
+    gerberDir,
+    files: [
+      { name: "board-F_Cu.gtl", bytes: 10 },
+      { name: "board-Edge_Cuts.gm1", bytes: 11 },
+    ],
+    cplFile,
+    stepFile: "",
+    stepBytes: 9 * 1024 * 1024,
+    notes: ["已重铺 2 个铺铜区并写回板子"],
+  });
+  assert.equal(bundle.ok, true, bundle.error);
+  const names = listZipEntries(readFileSync(bundle.file)).map((entry) => entry.name).sort();
+  assert.ok(names.includes("manifest.txt"), names.join(","));
+  assert.ok(names.includes("gerbers/board-F_Cu.gtl"), names.join(","));
+  assert.ok(names.includes("cpl/board-cpl.csv"), names.join(","));
+  assert.ok(names.includes("bom.csv"), names.join(","));
+  assert.ok(!names.some((name) => name.startsWith("3d/")), "9 MB 的 STEP 不该进包");
+  const manifest = readFileSync(join(root, "out", "board-fabrication.zip"));
+  assert.ok(manifest.length > 0);
 });

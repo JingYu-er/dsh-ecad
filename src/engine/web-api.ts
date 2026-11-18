@@ -2087,7 +2087,9 @@ export async function handleWebApi(input: {
         },
       });
     }
-    const fabricated = await exportFabrication(input.deps.subprocess, located.toolchain, latest.pcbFile, workspace.outDir);
+    const fabricated = await exportFabrication(input.deps.subprocess, located.toolchain, latest.pcbFile, workspace.outDir, input.deps.signal, {
+      bundle: parsed.value.bundle === true,
+    });
     // 导出成功即清掉「待导出」标记：面板不再提示，避免重复追问（S137）。
     if (fabricated.ok) {
       const previous = readAutoState(projectDir);
@@ -2100,6 +2102,9 @@ export async function handleWebApi(input: {
       ...fabricated.drillFiles.map((item) => ({ name: "drill/" + item.name, bytes: item.bytes })),
     ];
     if (fabricated.stepBytes > 0) artifacts.push({ name: "board.step", bytes: fabricated.stepBytes });
+    if (fabricated.bundleFile !== "") {
+      artifacts.push({ name: fabricated.bundleFile.split(/[\\/]/u).pop() ?? "fabrication.zip", bytes: fabricated.bundleBytes });
+    }
     return ok({
       ecadAction: {
         action: action,
