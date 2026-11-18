@@ -9,14 +9,10 @@ import path from "node:path";
 import { test } from "node:test";
 
 import { registerWebRoutes } from "../lib/engine/web-routes.js";
-import { capabilitiesOf, configSnapshot, handleWebApi, installStart, installTaskState, resetInstallTasks, saveConfig, summarizeProbe, WEB_API_PATHS, WEB_API_PREFIX, setSessionWorkspaceResolver } from "../lib/engine/web-api.js";
+import { configSnapshot, handleWebApi, saveConfig, WEB_API_PATHS, WEB_API_PREFIX, setSessionWorkspaceResolver } from "../lib/engine/web-api.js";
 import { resetToolchainConfigCache } from "../lib/data/toolchain-config.js";
-import { resetDebugSessionsForTest } from "../lib/engine/debug-session.js";
 import { emitEvent, eventSnapshot, resetEventBus, setEventSessionKey } from "../lib/engine/event-bus.js";
 import { beginToolCall, resetRunning } from "../lib/engine/progress.js";
-import { removeAllWatches, watchState } from "../lib/engine/watch.js";
-import { resetChannelTaps } from "../lib/engine/channel-tap.js";
-import { watchRecorder } from "../lib/engine/watch-record.js";
 
 /** 假的宿主 subprocess：本套件里没有任何路径会真的起进程。 */
 const fakeSubprocess = {
@@ -103,33 +99,6 @@ test("saveConfig：类型不对、包名注入、空补丁都在动手前拒掉"
 
   // 一次都没写成功：配置文件不该被创建。
   assert.equal(fs.existsSync(box.file), false);
-});
-
-test("capabilitiesOf + summarizeProbe：四项能力按 id 组合，缺件走必需项", () => {
-  const tools = [
-    makeResult("gcc", "arm-none-eabi-gcc", true, true),
-    makeResult("cmake", "CMake", true, true),
-    makeResult("ninja", "Ninja", true, true),
-    makeResult("openocd", "OpenOCD", true, true),
-    makeResult("gdb", "gdb-multiarch", false, true),
-    makeResult("cubemx", "STM32CubeMX", true, false),
-    makeResult("cubemx-java", "STM32CubeMX 内置 JRE", false, false),
-  ];
-  const capabilities = capabilitiesOf(tools);
-  assert.deepEqual(capabilities, { build: true, flash: true, debug: false, generate: false });
-
-  const summary = summarizeProbe(tools, { binDirs: ["C:/msys64/ucrt64/bin"], cubeMxRoots: [] });
-  assert.equal(summary.ok, false);
-  assert.deepEqual(summary.missingRequired, ["gdb-multiarch"]);
-  assert.match(summary.message, /缺 gdb-multiarch/u);
-  assert.equal(summary.tools.length, 7);
-  assert.deepEqual(summary.binDirs, ["C:/msys64/ucrt64/bin"]);
-
-  const allFound = tools.map((tool) => ({ ...tool, found: true }));
-  const ready = summarizeProbe(allFound, { binDirs: [], cubeMxRoots: [] });
-  assert.equal(ready.ok, true);
-  assert.deepEqual(ready.missingRequired, []);
-  assert.match(ready.message, /工具链就绪：7\/7 项可用/u);
 });
 
 test("handleWebApi：GET /config 返回快照，方法不对 405", async () => {
@@ -247,7 +216,7 @@ test("GET /projects：工作区索引与扫描合并，并返回当前工程描�
 
 
 
-test("GET /artifacts：返回 elf 与芯片容量；没有构建目录时 elf 为 null", async () => {
+test("GET /artifacts：返回 elf 与芯片型号；没有构建目录时 elf 为 null（S192）", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-web-artifacts-"));
   fs.writeFileSync(path.join(dir, "demo.ioc"), "Mcu.CPN=STM32F103C8T6\n", "utf8");
   const buildDir = path.join(dir, "build", "Debug");
@@ -262,7 +231,9 @@ test("GET /artifacts：返回 elf 与芯片容量；没有构建目录时 elf �
   });
   assert.equal(good.status, 200);
   assert.equal(good.body.artifacts.elf.name, "demo.elf");
-  assert.equal(good.body.artifacts.chip.flashBytes, 65536);
+  // 芯片容量表属于固件侧，硬件台只回型号，容量留空（S192）。
+  assert.equal(good.body.artifacts.chip, null);
+  assert.match(good.body.artifacts.notes.join("\n"), /STM32F103C8T6/u);
 
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-web-artifacts-empty-"));
   const bare = await handleWebApi({

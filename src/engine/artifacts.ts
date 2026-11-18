@@ -9,9 +9,6 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
-import { findChipFact } from "../data/device-facts.js";
-import { detectBuildDir, findElf, type ElfInfo } from "./build.js";
-import { readIocCpn } from "./breakpoints.js";
 
 export interface ArtifactFile {
   readonly name: string;
@@ -87,6 +84,48 @@ function hashFile(file: ArtifactFile): string {
   }
 }
 
+/** 本地找构建目录：<固件目录>/build/* 里挑最新的；找不到再试 <工程>/build/*。 */
+function detectBuildDir(projectDir: string): string | null {
+  const candidates: string[] = [];
+  for (const base of [projectDir, join(projectDir, "fw"), join(projectDir, "program"), join(projectDir, "firmware")]) {
+    const buildRoot = join(base, "build");
+    if (!existsSync(buildRoot)) continue;
+    for (const name of readdirSync(buildRoot)) {
+      const full = join(buildRoot, name);
+      if (existsSync(full) && statSync(full).isDirectory()) candidates.push(full);
+    }
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  return candidates[0] ?? null;
+}
+
+/** 构建目录里的 elf：优先与目录名/工程名同名的，其次最新的。 */
+function findElf(buildDir: string): { path: string } | null {
+  const elves = listElves(buildDir);
+  if (elves.length === 0) return null;
+  const wanted = basename(buildDir).toLowerCase();
+  const match = elves.find((file) => basename(file.name, ".elf").toLowerCase() === wanted);
+  return { path: (match ?? elves[0] as ArtifactFile).path };
+}
+
+/** 从 .ioc 里读 Mcu.CPN（没有就回空串：不猜型号）。 */
+function readIocCpn(projectDir: string): string {
+  for (const base of [projectDir, join(projectDir, "fw"), join(projectDir, "program"), join(projectDir, "firmware")]) {
+    if (!existsSync(base)) continue;
+    for (const name of readdirSync(base)) {
+      if (!name.toLowerCase().endsWith(".ioc")) continue;
+      try {
+        const match = /^Mcu\.CPN=(.+)$/mu.exec(readFileSync(join(base, name), "utf8"));
+        if (match !== null) return (match[1] ?? "").trim();
+      } catch {
+        // 读不了就继续找下一个
+      }
+    }
+  }
+  return "";
+}
+
 function listElves(buildDir: string): ArtifactFile[] {
   let names: string[];
   try {
@@ -103,7 +142,7 @@ function listElves(buildDir: string): ArtifactFile[] {
   return files;
 }
 
-export function readArtifacts(projectDir: string, env: NodeJS.ProcessEnv = process.env): ArtifactsResult {
+export function readArtifacts(projectDir: string, _env: NodeJS.ProcessEnv = process.env): ArtifactsResult {
   const dir = projectDir.trim();
   if (dir === "") return { ok: false, error: "projectDir 不能为空" };
   const notes: string[] = [];
@@ -111,7 +150,7 @@ export function readArtifacts(projectDir: string, env: NodeJS.ProcessEnv = proce
   if (buildDir === "") {
     notes.push("还没有可识别的构建目录：先执行 stm32_build 或 cmake --preset。");
   }
-  let elfInfo: ElfInfo | null = null;
+  let elfInfo: { path: string } | null = null;
   if (buildDir !== "") elfInfo = findElf(buildDir);
   const elf = withHash(elfInfo === null ? null : statFile(elfInfo.path));
   const hex = withHash(elf === null ? null : sibling(elf.path, ".hex"));
@@ -125,14 +164,10 @@ export function readArtifacts(projectDir: string, env: NodeJS.ProcessEnv = proce
     notes.push("elf 超过 " + String(Math.round(ARTIFACT_HASH_MAX_BYTES / 1024 / 1024)) + " MB，跳过校验和。");
   }
   const cpn = readIocCpn(dir);
-  let chip: ChipBudget | null = null;
-  if (cpn !== "") {
-    const fact = findChipFact(cpn, env);
-    if (fact === null) notes.push("资源包里没有 " + cpn + " 的容量数据，内存占用只能看构建输出。");
-    else chip = { cpn, flashBytes: fact.flashBytes, ramBytes: fact.ramBytes };
-  } else {
-    notes.push("工程里没有 .ioc 的 Mcu.CPN，无法给出容量上限。");
-  }
+  // 容量上限表属于固件侧（芯片资源包），硬件台不查它：这里只保留型号，容量留空。
+  const chip: ChipBudget | null = null;
+  if (cpn !== "") notes.push("芯片型号 " + cpn + "：容量上限要到固件侧看，硬件台不查芯片资源包。");
+  else notes.push("工程里没有 .ioc 的 Mcu.CPN，无法给出型号。");
   return {
     ok: true,
     report: {

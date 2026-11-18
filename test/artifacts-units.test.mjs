@@ -39,7 +39,7 @@ function projectWithArtifacts(options = {}) {
   return { dir, buildDir, elf };
 }
 
-test("readArtifacts：elf 与同名 hex/bin、芯片容量、无提示", () => {
+test("readArtifacts：elf 与同名 hex/bin、芯片型号、无提示（S192）", () => {
   const { dir, buildDir, elf } = projectWithArtifacts();
   const read = readArtifacts(dir);
   assert.equal(read.ok, true);
@@ -50,16 +50,17 @@ test("readArtifacts：elf 与同名 hex/bin、芯片容量、无提示", () => {
   assert.equal(report.hex.name, "demo.hex");
   assert.equal(report.bin.size, 1024);
   assert.equal(report.otherElves.length, 0);
-  assert.equal(report.chip.cpn, "STM32F103C8T6");
-  assert.equal(report.chip.flashBytes, 65536, "F103C8 的 Flash 是 64 KB");
-  assert.equal(report.chip.ramBytes, 20480, "F103C8 的 RAM 是 20 KB");
+  // 芯片容量表属固件侧资源包，硬件台只回型号（S192）。
+  assert.equal(report.chip, null);
+  assert.match(report.notes.join("\n"), /STM32F103C8T6/u, "型号要照 .ioc 报出来");
   assert.match(report.sha256, /^[0-9a-f]{64}$/u, "elf 很小，应给完整 SHA-256");
   assert.match(report.hex.sha256, /^[0-9a-f]{64}$/u, "hex 也要有校验和（S62）");
   assert.match(report.bin.sha256, /^[0-9a-f]{64}$/u, "bin 也要有校验和（S62）");
   assert.notEqual(report.hex.sha256, report.elf.sha256, "不同文件的校验和不应相同");
   assert.equal(sha256OfPath(report.elf.path), report.elf.sha256, "单文件校验和要与产物报告一致（S68）");
   assert.equal(sha256OfPath(path.join(dir, "missing.elf")), "", "文件不存在时给空串");
-  assert.deepEqual(report.notes, []);
+  assert.equal(report.notes.length, 1);
+  assert.match(report.notes[0], /容量上限要到固件侧看/u);
 });
 
 test("readArtifacts：缺 hex/bin 时给 null，不编造文件", () => {

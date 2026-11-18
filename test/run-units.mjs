@@ -43,7 +43,6 @@ const suites = [
   "datasheet-units.test.mjs",
   "ecad-autobuild-units.test.mjs",
   "ecad-units.test.mjs",
-  "engine-units.test.mjs",
   "event-bus-units.test.mjs",
   "fault-hints-units.test.mjs",
   "pcb-units.test.mjs",
@@ -56,9 +55,6 @@ const suites = [
   "tool-contract-units.test.mjs",
   "schematic-units.test.mjs",
   "session-context-units.test.mjs",
-  "session-units.test.mjs",
-  "text-encoding-units.test.mjs",
-  "toolchain-units.test.mjs",
   "web-api-units.test.mjs",
 ];
 

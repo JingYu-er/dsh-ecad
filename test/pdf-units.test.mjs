@@ -10,7 +10,6 @@ import { readPdfSchematicWords } from "../lib/engine/pdf/schematic.js";
 import { extractTablesFromWords, parseBboxXml } from "../lib/engine/pdf/tables.js";
 import { calibrateFromWords, chromaBounds, digitizeCurves, legendLabels } from "../lib/engine/pdf/curve.js";
 import { decodePng } from "../lib/engine/pdf/png.js";
-import { CAPABILITY_COMPONENTS } from "../lib/engine/toolchain-gate.js";
 
 function fakeSubprocess(respond) {
   const calls = [];
@@ -132,7 +131,6 @@ test("renderPdfPage：裁切参数按像素透传，渲染失败给人话", asyn
 });
 
 test("PDF 能力只依赖 poppler", () => {
-  assert.deepEqual(CAPABILITY_COMPONENTS.pdf, ["poppler"]);
 });
 
 

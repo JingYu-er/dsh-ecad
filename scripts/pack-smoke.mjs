@@ -1,144 +1,92 @@
 // npm pack 解包烟测：挡住"作者本机测不出、发布形态必炸"的一整类问题。
 //
-// 为什么要有它（两条真实事故）：
+// 为什么要有它：
 //   1) npm 打包永远排除 .gitignore（它同时是 npm 的忽略过滤器），而它曾被列为必需文件
-//      ——npm 安装的用户 stm32_project_create 100% 失败，源码安装的开发者完全测不出。
-//   2) cmsis-sources 的 marker 曾给 mpu_armv7.h 配了它真实内容里不存在的特征
-//      ——四条下载链路全通也必失败，同样的清单在单测里却一直绿。
-// 所以本脚本不等价于 npm test：它测的是"打包出来的东西"，不是"源码目录"。
+//      ——npm 安装的用户 100% 失败，源码安装的开发者完全测不出。
+//   2) 跑的是"打包出来的 lib"，不是"源码目录"——漏拷的引擎、没进包的数据文件都会在这里现形。
 //
 // 跑法：npm run test:pack（pack 到临时目录，不动仓库）。
+
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // 用插件自己的解包器（lib/engine/tar.js）：Windows 自带的是 libarchive 的 bsdtar，
-// 读不懂 npm 用 pax 扩展头标记的非 ASCII 文件名（docs/dsh-stm32-plugin-规格.md），
-// 会直接报 "Archive entry has empty or unreadable filename"。tar.ts 明确支持 x/g/L/K。
+// 读不懂 npm 用 pax 扩展头标记的非 ASCII 文件名，会直接报
+// "Archive entry has empty or unreadable filename"。
 import { extractTarGz } from "../lib/engine/tar.js";
 
 const root = process.cwd();
 const work = mkdtempSync(join(tmpdir(), "dsh-pack-smoke-"));
 const failures = [];
 const say = (ok, name, detail = "") => {
-  console.log((ok ? "PASS " : "FAIL ") + name + (detail === "" ? "" : " — " + detail));
-  if (!ok) failures.push(name + (detail === "" ? "" : " (" + detail + ")"));
+  console.log((ok ? "  · " : "  ✗ ") + name + (ok || detail === "" ? "" : "：" + detail));
+  if (!ok) failures.push(name + (detail === "" ? "" : "：" + detail));
 };
 
 try {
-  // 1) pack 到临时目录
-  const tarball = join(work, "pkg.tgz");
-  execFileSync("npm pack --pack-destination " + JSON.stringify(work) + " --ignore-scripts", { cwd: root, stdio: "pipe", shell: true });
-  const packed = readdirSync(work).find((name) => name.endsWith(".tgz"));
-  if (packed === undefined) throw new Error("npm pack 没产出 tgz");
-  const extracted = extractTarGz(readFileSync(join(work, packed)), work, { maxBytes: 256 * 1024 * 1024 });
-  if (!extracted.ok) throw new Error("解包失败：" + String(extracted.error ?? "未知原因"));
-  const pkgRoot = join(work, "package");
-  if (!existsSync(pkgRoot)) throw new Error("解包后没有 package/ 目录");
+  // 1) npm pack 到临时目录
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const out = execFileSync(npm, ["pack", "--json", "--pack-destination", work], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: process.platform === "win32",
+  });
+  const meta = JSON.parse(out.trim());
+  const packed = meta[0].filename;
+  say(existsSync(join(work, packed)), "npm pack 产出 tarball");
+  const unpacked = meta[0].unpackedSize;
+  console.log("  · 解包大小：" + (unpacked / 1024).toFixed(1) + " KB / " + meta[0].size + " B（压缩）");
 
-  // 2) 断言一：包内完整性。.gitignore 不在是**合法的**（已决事实：npm 会排除它），
-  //    其余关键文件一个都不能少。
+  // 2) 用插件自己的 tar 解包，断言必需文件都在
+  const extracted = extractTarGz(readFileSync(join(work, packed)), work, { maxBytes: 256 * 1024 * 1024 });
+  const pkgRoot = join(work, "package");
+  say(existsSync(pkgRoot), "解包出 package/ 目录", extracted === 0 ? "返回 0" : "");
+
   const mustHave = [
     "lib/index.js",
     "lib/client.js",
-    "lib/engine/register-template.js",
-    "lib/engine/flash.js",
-    "lib/engine/doctor.js",
-    "templates/register/CMakeLists.txt",
-    "templates/register/Core/Src/main.c",
-    "templates/scaffold/CMakeLists.txt",
-    "templates/scaffold/CMakePresets.json",
-    "templates/scaffold/STM32F103XX_FLASH.ld",
-    "templates/scaffold/cmake/gcc-arm-none-eabi.cmake",
-    "templates/scaffold/vscode/launch.json",
-    "templates/scaffold/vscode/settings.json",
-    "templates/scaffold/demo.ioc",
-    "templates/scaffold/openocd.cfg",
+    "lib/tools/pcb.js",
+    "lib/tools/ecad.js",
+    "lib/engine/ecad/pcb/pcb-svg.js",
+    "lib/engine/ecad/fabrication.js",
+    "lib/engine/ecad/bom.js",
+    "lib/engine/ecad/netgate.js",
     "cordis.patch.yml",
     "assets/manifest.json",
-    "assets/device/f1/chips.json",
   ];
   for (const rel of mustHave) {
     say(existsSync(join(pkgRoot, rel)), "包内文件存在：" + rel);
   }
+
   // client 源与构建产物等价（copy-client 是原样复制）
   const clientSrc = readFileSync(join(root, "client", "client.js"));
   const clientLib = readFileSync(join(pkgRoot, "lib", "client.js"));
   say(clientSrc.equals(clientLib), "lib/client.js 与 client/client.js 逐字节一致");
 
-  // 3) 断言二：用**解包出来的** lib + templates 真建一个寄存器工程（假 fetch，不发网）。
-  //    register-template 从 import.meta.url 解析 templates（../../templates/register），
-  //    解包目录里正好同构 —— 所以这一步能同时验证 lib 找得到 templates、清单是对的。
-  const mod = await import("file://" + join(pkgRoot, "lib", "engine", "register-template.js").replace(/\\/gu, "/"));
-  const payload = (name, size = 800) => {
-    let text = "";
-    while (text.length < size) text += "/* " + name + " */ ";
-    return text + "\n" + markerFor(name);
-  };
-  function markerFor(name) {
-    if (name === "system_stm32f1xx.c") return "void SystemInit(void);";
-    if (name.endsWith(".s")) return ".syntax unified\n_estack:";
-    if (name === "core_cm3.h") return "#ifndef __CORE_CM3_H";
-    if (name === "cmsis_compiler.h") return "#ifndef __CMSIS_COMPILER_H";
-    if (name === "cmsis_gcc.h") return "#ifndef __CMSIS_GCC_H";
-    if (name === "cmsis_version.h") return "#define __CMSIS_VERSION";
-    if (name === "mpu_armv7.h") return "#ifndef ARM_MPU_ARMV7_H";
-    if (name === "stm32f1xx.h") return "#ifndef __STM32F1XX_H";
-    if (name === "stm32f103xb.h") return "#ifndef __STM32F103xB_H";
-    if (name === "system_stm32f1xx.h") return "#ifndef __SYSTEM_STM32F1XX_H";
-    return "#ifndef __" + name.replace(/[^a-z0-9]/gi, "_").toUpperCase() + "_H";
-  }
-  const SAMPLES = {
-    "Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f1xx.h": payload("stm32f1xx.h", 400),
-    "Drivers/CMSIS/Device/ST/STM32F1xx/Include/system_stm32f1xx.h": payload("system_stm32f1xx.h", 400),
-    "Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f103xb.h": payload("stm32f103xb.h", 12000),
-    "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c": payload("system_stm32f1xx.c", 1200),
-    "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s": payload("startup_stm32f103xb.s", 1200),
-    "Drivers/CMSIS/Include/core_cm3.h": payload("core_cm3.h", 600),
-    "Drivers/CMSIS/Include/cmsis_compiler.h": payload("cmsis_compiler.h", 600),
-    "Drivers/CMSIS/Include/cmsis_gcc.h": payload("cmsis_gcc.h", 600),
-    "Drivers/CMSIS/Include/cmsis_version.h": payload("cmsis_version.h", 600),
-    "Drivers/CMSIS/Include/mpu_armv7.h": payload("mpu_armv7.h", 600),
-  };
-  const hashes = {};
-  for (const [key, text] of Object.entries(SAMPLES)) {
-    hashes[key] = createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
-  }
-  const fakeFetch = async (url) => {
-    const name = url.split("/").pop();
-    const key = Object.keys(SAMPLES).find((candidate) => candidate.endsWith("/" + name));
-    return new Response(key === undefined ? "" : SAMPLES[key], { status: 200 });
-  };
-  const projectDir = join(work, "proj");
-  const cacheDir = join(work, "cache");
-  // 设备事实必须来自**解包后的**内置 assets/：显式清掉 DSH_STM32_ASSETS，让 lib/engine/assets.js
-  // 的 ../../assets 解析到包根。这一步同时验证 assets/ 真的进了 tarball（而不是只在本机仓库里）。
-  delete process.env.DSH_STM32_ASSETS;
-  const env = { DSH_STM32_CACHE: cacheDir, DSH_STM32_ASSETS: "" };
-  const report = await mod.createRegisterProject({
-    targetDir: projectDir,
-    projectName: "smoke",
-    mcu: "STM32F103C8T6",
-    env,
-    fetchImpl: fakeFetch,
-    hashes,
-  });
-  say(report.ok, "解包产物能建寄存器工程", report.ok ? "" : report.message.slice(0, 300));
-  if (report.ok) {
-    const produced = [
-      "CMakeLists.txt",
-      "Core/Src/main.c",
-      "Drivers/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s",
-      "Drivers/CMSIS/Device/ST/STM32F1xx/Include/stm32f103xb.h",
-      "Drivers/CMSIS/Include/core_cm3.h",
-      "Drivers/CMSIS/Include/mpu_armv7.h",
-    ];
-    for (const rel of produced) {
-      say(existsSync(join(projectDir, rel)), "工程产物存在：" + rel);
-    }
-  }
+  // 3) 用**解包出来的** lib 真渲染一块板：验证 ecad 引擎在发布形态下能加载
+  const pcbSvg = await import("file://" + join(pkgRoot, "lib", "engine", "ecad", "pcb", "pcb-svg.js").replace(/\\/gu, "/"));
+  const board = [
+    "(kicad_pcb (version 20241229) (generator smoke)",
+    '  (layers "F.Cu" "B.Cu")',
+    '  (gr_line (start 0 0) (end 20 0) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 20 0) (end 20 10) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 20 10) (end 0 10) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 0 10) (end 0 0) (width 0.1) (layer "Edge.Cuts"))',
+    ')',
+  ].join("\n");
+  const rendered = pcbSvg.renderPcbSvg(
+    (await import("file://" + join(pkgRoot, "lib", "engine", "ecad", "pcb", "scene.js").replace(/\\/gu, "/"))).parsePcbScene(
+      board,
+      join(pkgRoot, "smoke.kicad_pcb"),
+    ),
+    { maxPx: 120 },
+  );
+  say(rendered.ok === true, "解包产物能解析并渲染板图", rendered.ok ? "" : rendered.error);
+  say(typeof rendered.svg === "string" && rendered.svg.includes("viewBox"), "板图 SVG 带 viewBox");
+  say(Math.abs(rendered.widthMm - 23.2) < 0.5, "板图宽度含边距（20 + 2×1.6 mm）", String(rendered.widthMm));
 } catch (error) {
   say(false, "烟测本身异常", error instanceof Error ? error.message : String(error));
 } finally {

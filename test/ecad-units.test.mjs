@@ -52,9 +52,7 @@ import { applyQuotes, buildBom, renderBomCsv, renderBomMarkdown } from "../lib/e
 import { parseLcscPrice, readPriceCache, writePriceCache } from "../lib/engine/datasheet/price.js";
 import { registerEcadTools } from "../lib/tools/ecad.js";
 import { registerPcbTools } from "../lib/tools/pcb.js";
-import { buildTargets } from "../lib/engine/probe.js";
 import { resolveSearchConfig } from "../lib/data/search-roots.js";
-import { guidesFor } from "../lib/data/install-guides.js";
 import { collectPackageFiles, packageHardware, verifyPackage } from "../lib/engine/ecad/package.js";
 import { createZip, listZipEntries } from "../lib/engine/ecad/zip.js";
 import { locateEcadToolchain } from "../lib/engine/ecad/toolchain.js";
@@ -697,27 +695,6 @@ test("打包：没有 hardware 目录时给人话，不写文件（S107）", () 
     assert.equal(packed.file, "");
   } finally {
     rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("工具链探测覆盖电路设计的两件套：kicad 与 npm（S108）", () => {
-  const config = resolveSearchConfig({});
-  const targets = buildTargets(config);
-  const kicad = targets.find((item) => item.id === "kicad");
-  const npm = targets.find((item) => item.id === "npm");
-  assert.ok(kicad !== undefined, "探测列表要含 kicad");
-  assert.ok(npm !== undefined, "探测列表要含 npm");
-  for (const target of [kicad, npm]) {
-    assert.equal(target.required, false, target.id + " 不应是必需项");
-    assert.ok(target.install.length >= 2, target.id + " 要给安装步骤");
-    assert.ok(target.verify !== "", target.id + " 要给自检命令");
-  }
-  // 缺件时的指引要能落到「怎么装」：两条都必须是 manual，并自带步骤。
-  const guides = guidesFor(["kicad", "npm"]);
-  assert.equal(guides.length, 2);
-  for (const guide of guides) {
-    assert.equal(guide.installability, "manual");
-    assert.ok(guide.steps.length >= 2 && guide.verify !== "");
   }
 });
 

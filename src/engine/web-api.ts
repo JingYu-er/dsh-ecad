@@ -21,13 +21,10 @@ import {
   updateToolchainConfig,
   type ToolchainConfig,
 } from "../data/toolchain-config.js";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
-import { resolveSearchConfig } from "../data/search-roots.js";
-import { buildTargets, probeAll, type ProbeResult } from "./probe.js";
-import { planOrInstallMsys2, type Msys2InstallResult } from "./msys2-install.js";
 import {
   EVENT_RING_LIMIT,
   eventSessionKey,
@@ -46,25 +43,12 @@ import {
   parseHandSyncOutput,
   planHandSync,
 } from "./ecad/pcb/hand-sync.js";
-import { abortAll, abortCall, listRunning } from "./progress.js";
-import { channelTapStatus, setChannelTaps } from "./channel-tap.js";
-import { watchRecorder } from "./watch-record.js";
+import { listRunning } from "./progress.js";
 import { agentOfSession } from "./session-context.js";
-import { closeSerial, listPorts, openSerial, sendSerial, serialStatus } from "./serial.js";
-import { readInterrupts, setInterruptPriorities, setInterruptPriority } from "./interrupts.js";
-import { readIocSync } from "./ioc-sync.js";
-import { addWatches, clearWatches, listWatches, removeWatches } from "./watch-admin.js";
-import { buildFromPanel, flashFromPanel } from "./panel-actions.js";
-import { readSourceSlice } from "./source-slice.js";
-import { readProbeInfo } from "./probe-info.js";
-import { debugSessions } from "./debug-session.js";
-import { readClockTree } from "./clocks.js";
 import { readArtifacts } from "./artifacts.js";
 import { decodeFault, groupFaults } from "./fault-hints.js";
-import { readIocDiff, readIocKeysForPin, restoreAllIocKeys, restoreIocKey, saveIocSnapshot } from "./ioc-diff.js";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { readPinout } from "./pinout.js";
 import { findRootSchematic, readSchematic } from "./schematic/model.js";
 import { checkSchematic } from "./schematic/checks.js";
 import { findLatestKicadBuild, listCircuitEntries, planEcadWorkspace, runTsciBuild } from "./ecad/tsci.js";
@@ -77,7 +61,7 @@ import { locateEcadToolchain } from "./ecad/toolchain.js";
 import { locatePoppler } from "./pdf/toolchain.js";
 import { popplerDirs } from "../tools/pdf.js";
 import { readPcbScene } from "./ecad/pcb/scene.js";
-import { connectPcbIpc, runPcbIpc } from "./ecad/pcb/ipc.js";
+import { connectPcbIpc } from "./ecad/pcb/ipc.js";
 import { renderPcbSvg } from "./ecad/pcb/pcb-svg.js";
 import { applyQuotes, readBom } from "./ecad/bom.js";
 import { analyzeStackup, DEFAULT_TARGETS } from "./ecad/pcb/stackup.js";
@@ -106,7 +90,6 @@ import { runSchematicReview } from "./schematic/review.js";
 import { datasheetStatus, ensureProjectDatasheets } from "./datasheet/auto.js";
 import { krtRoot, krtStatus, krtVersion } from "./ecad/pcb/krt.js";
 import { cacheBytes, datasheetCacheDir } from "./datasheet/store.js";
-import { findIocFile } from "./generate.js";
 import type { SubprocessService } from "../types.js";
 
 /** 面板能看到的四类能力（与 stm32_doctor 同一口径）。 */
@@ -244,223 +227,12 @@ export function saveConfig(
   return { ok: written.ok, error: written.error, path: written.path, config: read.config };
 }
 
-/* ----------------------------- 探测 ----------------------------- */
-
-export interface ProbeSummary {
-  ok: boolean;
-  binDirs: string[];
-  cubeMxRoots: string[];
-  capabilities: WebCapabilities;
-  missingRequired: string[];
-  tools: ProbeResult[];
-  message: string;
-}
-
-/** build 的 gcc/cmake/ninja 才算必需；CubeMX 两项是可选能力。 */
-export function capabilitiesOf(tools: readonly ProbeResult[]): WebCapabilities {
-  const has = (id: string): boolean => tools.some((tool) => tool.id === id && tool.found);
-  return {
-    build: has("gcc") && has("cmake") && has("ninja"),
-    flash: has("openocd"),
-    debug: has("openocd") && has("gdb"),
-    generate: has("cubemx") && has("cubemx-java"),
-  };
-}
-
-export function summarizeProbe(
-  results: readonly ProbeResult[],
-  config: { binDirs: string[]; cubeMxRoots: string[] },
-): ProbeSummary {
-  const capabilities = capabilitiesOf(results);
-  const missingRequired = results.filter((item) => item.required && !item.found).map((item) => item.label);
-  const found = results.filter((item) => item.found).length;
-  const message =
-    missingRequired.length === 0
-      ? "工具链就绪：" + String(found) + "/" + String(results.length) + " 项可用，可以编译 / 烧录 / 调试"
-      : "缺 " + missingRequired.join("、") + "：编译 / 烧录 / 调试会失败（CubeMX 两项只影响生成代码）";
-  return {
-    ok: missingRequired.length === 0,
-    binDirs: config.binDirs,
-    cubeMxRoots: config.cubeMxRoots,
-    capabilities,
-    missingRequired,
-    tools: [...results],
-    message,
-  };
-}
-
-/** 面板点「探测工具链」：显式入参 > 环境变量 > 配置文件 > 默认值 + 自动发现。 */
-export async function probeTools(
-  payload: Record<string, unknown>,
-  deps: WebApiDeps,
-): Promise<{ ok: boolean; error: string; summary: ProbeSummary | null }> {
-  const overrides: { binDirs?: string[]; cubeMxRoots?: string[] } = {};
-  if (payload["binDirs"] !== undefined) {
-    const binDirs = stringList(payload["binDirs"]);
-    if (binDirs === null) return { ok: false, error: "binDirs 必须是字符串数组", summary: null };
-    if (binDirs.length > 0) overrides.binDirs = binDirs;
-  }
-  if (payload["cubeMxRoot"] !== undefined) {
-    if (typeof payload["cubeMxRoot"] !== "string") {
-      return { ok: false, error: "cubeMxRoot 必须是字符串", summary: null };
-    }
-    const root = payload["cubeMxRoot"].trim();
-    if (root !== "") overrides.cubeMxRoots = [root];
-  }
-  const config = resolveSearchConfig(envOf(deps), overrides);
-  const targets = buildTargets(config);
-  const options = deps.signal === undefined ? {} : { signal: deps.signal };
-  const results = await probeAll(deps.subprocess, targets, config, options);
-  return {
-    ok: true,
-    error: "",
-    summary: summarizeProbe(results, { binDirs: [...config.binDirs], cubeMxRoots: [...config.cubeMxRoots] }),
-  };
-}
-
-/* ----------------------------- 安装 ----------------------------- */
-
-interface InstallTask {
-  id: string;
-  status: "running" | "done" | "failed";
-  startedAt: number;
-  finishedAt: number;
-  lines: string[];
-  result: Msys2InstallResult | null;
-  error: string;
-}
-
-const INSTALL_LOG_LIMIT = 200;
-const installTasks = new Map<string, InstallTask>();
-let installSeq = 0;
-
-function newInstallTask(): InstallTask {
-  installSeq += 1;
-  const id = "install-" + String(Date.now()) + "-" + String(installSeq);
-  const task: InstallTask = { id, status: "running", startedAt: Date.now(), finishedAt: 0, lines: [], result: null, error: "" };
-  installTasks.set(id, task);
-  return task;
-}
-
-function appendLine(task: InstallTask, line: string): void {
-  task.lines.push(line);
-  if (task.lines.length > INSTALL_LOG_LIMIT) task.lines.splice(0, task.lines.length - INSTALL_LOG_LIMIT);
-}
-
-export interface InstallState {
-  taskId: string;
-  status: "running" | "done" | "failed";
-  lines: string[];
-  message: string;
-  steps: { id: string; label: string; status: string; detail: string }[];
-  ok: boolean;
-  durationMs: number;
-}
-
-export function installTaskState(taskId: string): InstallState | null {
-  const task = installTasks.get(taskId);
-  if (task === undefined) return null;
-  const result = task.result;
-  const message =
-    task.status === "running"
-      ? "正在安装：步骤在跑，日志往下滚。"
-      : task.error !== ""
-        ? task.error
-        : result === null
-          ? ""
-          : result.message;
-  return {
-    taskId: task.id,
-    status: task.status,
-    lines: [...task.lines],
-    message,
-    steps:
-      result === null
-        ? []
-        : result.steps.map((step) => ({ id: step.id, label: step.label, status: step.status, detail: step.detail })),
-    ok: result === null ? false : result.ok,
-    durationMs: (task.finishedAt === 0 ? Date.now() : task.finishedAt) - task.startedAt,
-  };
-}
-
-export interface InstallPlanResult {
-  ok: boolean;
-  error: string;
-  plan: Msys2InstallResult | null;
-}
-
-/** 计划模式：只算大小与步骤，零副作用（不下载、不建目录、不写注册表）。 */
-export async function installPlan(payload: Record<string, unknown>, deps: WebApiDeps): Promise<InstallPlanResult> {
-  const request: { mode: "plan"; targetDir?: string; packages?: string[]; writePath: boolean; signal?: AbortSignal } = {
-    mode: "plan",
-    writePath: payload["writePath"] !== false,
-  };
-  if (payload["targetDir"] !== undefined) {
-    if (typeof payload["targetDir"] !== "string") return { ok: false, error: "targetDir 必须是字符串", plan: null };
-    request.targetDir = payload["targetDir"].trim();
-  }
-  if (payload["packages"] !== undefined) {
-    const packages = packageList(payload["packages"]);
-    if (!packages.ok) return { ok: false, error: packages.error, plan: null };
-    if (packages.packages.length > 0) request.packages = packages.packages;
-  }
-  if (deps.signal !== undefined) request.signal = deps.signal;
-  try {
-    const plan = await planOrInstallMsys2(deps.subprocess, request, envOf(deps));
-    return { ok: true, error: "", plan };
-  } catch (error) {
-    return { ok: false, error: "出计划失败：" + describeError(error), plan: null };
-  }
-}
-
-/** 真装：立刻返回 taskId，安装跑在后台，面板轮询 install/state。 */
-export function installStart(payload: Record<string, unknown>, deps: WebApiDeps): { ok: boolean; error: string; taskId: string } {
-  if (payload["confirm"] !== true) {
-    return { ok: false, error: "真装必须带 confirm:true（面板上要先点确认）", taskId: "" };
-  }
-  const request: {
-    mode: "install";
-    targetDir?: string;
-    packages?: string[];
-    writePath: boolean;
-    signal?: AbortSignal;
-    onProgress?: (line: string) => void;
-  } = { mode: "install", writePath: payload["writePath"] !== false };
-  if (payload["targetDir"] !== undefined) {
-    if (typeof payload["targetDir"] !== "string") return { ok: false, error: "targetDir 必须是字符串", taskId: "" };
-    request.targetDir = payload["targetDir"].trim();
-  }
-  if (payload["packages"] !== undefined) {
-    const packages = packageList(payload["packages"]);
-    if (!packages.ok) return { ok: false, error: packages.error, taskId: "" };
-    if (packages.packages.length > 0) request.packages = packages.packages;
-  }
-  if (deps.signal !== undefined) request.signal = deps.signal;
-  const task = newInstallTask();
-  const env = envOf(deps);
-  appendLine(task, "开始安装：" + new Date(task.startedAt).toLocaleTimeString());
-  void planOrInstallMsys2(deps.subprocess, { ...request, onProgress: (line) => appendLine(task, line) }, env)
-    .then((result) => {
-      task.result = result;
-      task.status = result.ok ? "done" : "failed";
-      task.error = result.ok ? "" : result.message;
-      appendLine(task, result.message);
-    })
-    .catch((error: unknown) => {
-      task.status = "failed";
-      task.error = "安装异常终止：" + describeError(error);
-      appendLine(task, task.error);
-    })
-    .finally(() => {
-      task.finishedAt = Date.now();
-      if (installTasks.size > 20) {
-        const oldest = [...installTasks.values()]
-          .sort((left, right) => left.startedAt - right.startedAt)
-          .slice(0, installTasks.size - 20);
-        for (const item of oldest) installTasks.delete(item.id);
-      }
-    });
-  return { ok: true, error: "", taskId: task.id };
+/** 在指定目录里找唯一的 .ioc：没有或有多个都算「找不到」（不猜）。 */
+function findIocFile(projectDir: string): string | null {
+  if (!existsSync(projectDir)) return null;
+  const names = readdirSync(projectDir).filter((name) => name.toLowerCase().endsWith(".ioc"));
+  if (names.length !== 1) return null;
+  return join(projectDir, names[0] as string);
 }
 
 /* ---------------------------- 分发 ---------------------------- */
@@ -504,9 +276,7 @@ export function debugSessionForeign(sessionId: string, owner: string): boolean {
 }
 
 /** 当前调试会话是否属于另一条会话：是则面板不能把它当成自己的。 */
-function isForeignDebugSession(sessionId: string): boolean {
-  return debugSessionForeign(sessionId, debugSessions.status().owner);
-}
+
 
 /** 模块加载时刻：用来判断运行中的进程是不是本次构建后的实例。 */
 const PLUGIN_STARTED_AT = Date.now();
@@ -2249,44 +2019,10 @@ export async function handleWebApi(input: {
       },
     });
   }
-  if (path === WEB_API_PREFIX + "/channels/start" || path === WEB_API_PREFIX + "/channels/stop") {
-    // 只认 serial / rtt 两个开关；不传就是两个都动，免得面板为「全开」多发一次请求。
-    const wantOn = path.endsWith("/start");
-    const picked: { serial?: boolean; rtt?: boolean } = {};
-    for (const name of ["serial", "rtt"] as const) {
-      const raw = parsed.value[name];
-      if (raw === undefined) continue;
-      if (typeof raw !== "boolean") return fail(400, name + " 必须是布尔值");
-      picked[name] = wantOn ? raw : !raw;
-    }
-    if (Object.keys(picked).length === 0) {
-      picked.serial = wantOn;
-      picked.rtt = wantOn;
-    }
-    return ok({ channels: setChannelTaps(picked) });
-  }
-  if (path === WEB_API_PREFIX + "/watch-recording/start" || path === WEB_API_PREFIX + "/watch-recording/stop") {
-    if (path.endsWith("/stop")) return ok({ watchRecording: watchRecorder.stop() });
-    const raw = parsed.value.intervalMs;
-    if (raw !== undefined) {
-      // 夹紧放在录制器里，这里只拒掉明显不是「毫秒数」的输入。
-      if (typeof raw !== "number" || !Number.isFinite(raw) || Math.trunc(raw) !== raw) {
-        return fail(400, "intervalMs 必须是 500–60000 的整数（毫秒）");
-      }
-      if (raw < 500 || raw > 60_000) {
-        return fail(400, "intervalMs 必须是 500–60000 的整数（毫秒）");
-      }
-    }
-    const started = watchRecorder.start(raw === undefined ? {} : { intervalMs: raw });
-    return ok({ watchRecording: started });
-  }
   return fail(404, "没有这个接口：" + path);
 }
 
-/** 单测用：清空安装任务表。 */
-export function resetInstallTasks(): void {
-  installTasks.clear();
-}
+
 
 /* ------------------------------ 事件流 ------------------------------ */
 

@@ -5932,7 +5932,28 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 调试台：事件总线、SSE 与停靠网格（2026-11，S1–S190）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S192）
+
+### 一百九十八、清掉固件侧残留：61 个文件、包体 1121 → 637 KB（S192）
+
+拆出硬件插件时只裁了工具与路由，引擎层留下的固件模块仍被 `web-api.ts` 的 import 拽着，`lib/` 里也还躺着一堆没人引用的产物。这一轮把「源码里没注册」推进到「从 `src/index.ts` 不可达」：
+
+| 类别 | 处理 |
+| --- | --- |
+| 从 index 不可达且测试不用 | 删 10 个模块（`clock-db`/`clock-f1`/`clocks`/`interrupts`/`ioc-diff`/`ioc-sync`/`panel-actions`/`probe-info`/`source-slice`/`watch-admin`） |
+| web-api 里的固件路由与安装流程 | 删 `/channels/*`、`/watch-recording/*`、`probeTools`/`installPlan`/`installStart` 与对应 import；`findIocFile` 本地化为 `readdirSync` 小函数 |
+| 仍被硬件侧引用的共享件 | `cubemx-db`（引脚库）、`facts`、`xcube-catalog`、`workspace-memo`、`tar`（pack 烟测解包器）保留 |
+| 固件专属引擎 | 删 61 个文件：`build`/`flash`/`debug*`/`gdb-mi`/`rtt`/`serial`/`watch*`/`generate*`/`usercode-merge`/`firmware-*`/`assets`/`cache`/`probe` 等 |
+| `artifacts.ts` | 解耦：本地实现 `detectBuildDir`/`findElf`/`readIocCpn`，芯片容量表属固件侧，`chip` 恒 `null` 并在 notes 里说明 |
+
+两条必须记住的：
+
+1. **删源码后 `npm run build` 不会清 `lib/`。** 旧 `lib/*.js` 既会被打进包（`test:size` 里能看到已删模块），又会让测试继续 import 成功，直到某天清空 `lib/` 才一起暴露。正确顺序是 `rm -rf lib && npm run build`，然后逐条修测试里对已删模块的 import。
+2. **`scripts/pack-smoke.mjs` 是固件味的。** 它原来断言 `lib/engine/{register-template,flash,doctor}.js` 与 `templates/register/**`、还会真建一个寄存器工程——这些都不该存在于硬件插件。改成断言硬件侧产物（`lib/tools/{pcb,ecad}.js`、`ecad/pcb/pcb-svg.js`、`fabrication.js`、`bom.js`、`netgate.js`），并用**解包出来的** `lib` 真解析渲染一块 20×10 mm 的合成板（12 个元素、`viewBox`、宽度含 1.6 mm 边距）。
+
+结果：可达性 `unreachable: 0`、**285 pass / 0 fail**（固件套件整份删除，345 → 285）、包体 **636.7 KB / 169 文件 / 解包 2915.8 KB**（原 1121.2 KB / 256 文件）。
+
+教训：拆插件不是把工具删掉就完了——**引擎层、测试层、打包脚本各自都有一份「谁还在用」的答案**，只有从入口做可达性分析，三份答案才对得上。
 
 ### 一百九十七、制造整包：一个 zip 里放齐板厂与 SMT 厂要的东西（S190）
 

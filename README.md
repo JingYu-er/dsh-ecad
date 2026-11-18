@@ -173,7 +173,7 @@ dsh plugin --profile desktop add dsh-ecad
 ```bash
 npm run typecheck
 npm run build
-node test/run-units.mjs     # 22 套件 / 340 pass（含 tools 契约与 schema 子集守卫）
+node test/run-units.mjs     # 22 套件 / 285 pass（含 tools 契约与 schema 子集守卫）
 npm run test:pack
 npm run test:size           # 需 export npm_config_cache=/tmp/npmcache
 ```

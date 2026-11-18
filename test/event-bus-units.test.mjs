@@ -25,7 +25,6 @@ import {
 import { dateFolder, evidenceRoot, flushEvicted, flushPending, pruneEvidence, resetArchiveCursor, safeSessionKey, sessionEvidenceDir, evidencePolicy } from "../lib/engine/event-log.js";
 import { instrumentContext, withToolEvents } from "../lib/engine/tool-events.js";
 import { openEventStream } from "../lib/engine/web-api.js";
-import { CHANNEL_LINE_LIMIT, emitChannel } from "../lib/engine/channels.js";
 
 function tempDir(tag) {
   return mkdtempSync(join(tmpdir(), "dsh-stm32-" + tag + "-"));
@@ -326,40 +325,6 @@ test("事件流：先补发存量、再推送增量，断开时清理订阅", ()
   assert.equal(writes.length, before, "close 之后不应再写");
   assert.equal(writes[writes.length - 1].end, true);
   stop();
-});
-
-test("通道事件：统一 kind 前缀、单行截断、总量超限只留前面部分", () => {
-  resetEventBus();
-  assert.equal(emitChannel({ channel: "serial", lines: [] }), null, "没有内容就不发事件");
-  const one = emitChannel({ channel: "serial", lines: ["boot ok", ""] });
-  assert.equal(one.kind, "channel:serial");
-  assert.equal(one.source, "model");
-  assert.equal(one.summary, "串口 1 行");
-  assert.deepEqual(one.payload.lines, ["boot ok"], "空行不算一行");
-
-  resetEventBus();
-  const long = "x".repeat(500);
-  const tooMany = Array.from({ length: CHANNEL_LINE_LIMIT + 5 }, (_unused, index) => "line " + String(index));
-  const bulk = emitChannel({ channel: "rtt", lines: [long, ...tooMany], meta: { action: "dump" } });
-  assert.equal(bulk.kind, "channel:rtt");
-  assert.equal(bulk.payload.lines.length, CHANNEL_LINE_LIMIT);
-  assert.equal(bulk.payload.omitted, 6);
-  assert.ok(String(bulk.payload.lines[0]).endsWith("…"), "超长行要被截断");
-  assert.equal(bulk.payload.meta.action, "dump");
-  assert.ok(bulk.summary.includes("面板保留前"), bulk.summary);
-
-  // 监视通道带结构化样本：面板据此画历史曲线，不必解析文本行。
-  resetEventBus();
-  const watch = emitChannel({
-    channel: "watch",
-    lines: ["g_tick_1k = 42（+1）"],
-    meta: { action: "sample", samples: [{ expression: "g_tick_1k", value: "42", delta: "+1", ok: true }] },
-  });
-  assert.equal(watch.kind, "channel:watch");
-  assert.equal(watch.payload.meta.samples.length, 1);
-  assert.equal(watch.payload.meta.samples[0].expression, "g_tick_1k");
-  assert.equal(watch.payload.meta.samples[0].value, "42");
-  assert.equal(watch.summary, "监视 1 行");
 });
 
 test("会话过滤：快照与计数只认本会话，未带会话键的事件不误入", () => {
