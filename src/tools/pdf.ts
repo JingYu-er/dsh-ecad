@@ -13,12 +13,13 @@
 
 import { extname, isAbsolute, resolve } from "node:path";
 
-import type { DshContext, JsonSchema, ToolExec } from "../types.js";
+import type { DshContext, JsonSchema, ToolDefinition, ToolExec } from "../types.js";
 import { resolveSearchConfig } from "../data/search-roots.js";
 import { extractPdfTables, extractPdfText, listFigures, readPdfCurves, readPdfInfo, renderPdfPage, readPdfSchematic,
 } from "../engine/pdf/reader.js";
 import { locatePoppler } from "../engine/pdf/toolchain.js";
 import { datasheetCacheDir, resolveDatasheetRef } from "../engine/datasheet/store.js";
+import { jsonSafe } from "../engine/json-safe.js";
 
 export const PDF_READ_TOOL = "ecad_pdf_read";
 
@@ -185,7 +186,7 @@ function absoluteFile(raw: string): string {
 }
 
 export function registerPdfTools(ctx: DshContext): void {
-  ctx.tools.register({
+  const definition: ToolDefinition = {
     name: PDF_READ_TOOL,
     description:
       "读 PDF：数据手册与原理图都适用。mode=info 看页数与有无文字层；text 取指定页文字（-layout 保版面，表格可读）；figures 列图与表；render 把页面或局部渲染成 PNG 并返回路径，供视觉读曲线与框图。",
@@ -481,5 +482,11 @@ export function registerPdfTools(ctx: DshContext): void {
         ],
       };
     },
+  };
+  // 宿主拒绝「无法无损序列化」的返回值（NaN/Infinity/undefined 会让整步失败）。
+  // 手册里读出来的是测量数据，缺测点很正常——统一在工具边界收敛一次。
+  ctx.tools.register({
+    ...definition,
+    execute: async (args: unknown, exec: ToolExec) => jsonSafe(await definition.execute(args as never, exec)),
   });
 }

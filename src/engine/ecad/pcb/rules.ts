@@ -43,6 +43,16 @@ export function fabFloorForLayers(copperLayers: number): DesignRuleFloor {
  */
 export const ROUTER_GRID_MARGIN_MM = 0.003;
 
+/**
+ * 孔到铜的间距（mm）。
+ *
+ * 与铜间距分开取档：KiCad 默认 0.25 mm，而嘉立创 2 层与 4 层常规工艺都能做 0.20 mm。
+ * 拿铜间距档（0.1/0.127）去写这条是错的——它比厂里能力还松，等于没检查；
+ * 直接写 0.25 又会把厂里做得出来的板子判成违规（实测 handheld 的 Ø0.65 定位孔
+ * 距铜 0.2007 mm，被默认规则报错）。
+ */
+export const HOLE_CLEARANCE_MM = 0.2;
+
 /** 供 DRC 规则文件用的档位：名义档减掉量化余量。 */
 export function druFloorForLayers(copperLayers: number): DesignRuleFloor {
   const nominal = fabFloorForLayers(copperLayers);
@@ -134,7 +144,7 @@ export function ensureDesignRules(kicadDir: string, floor?: DesignRuleFloor): De
   if (rules !== undefined) {
     const floors: ReadonlyArray<readonly [string, number, boolean]> = [
       ["min_clearance", target.clearanceMm, true],
-      ["min_hole_clearance", target.clearanceMm, true],
+      ["min_hole_clearance", HOLE_CLEARANCE_MM, true],
       ["min_track_width", target.trackWidthMm, false],
     ];
     for (const [key, value, exact] of floors) {

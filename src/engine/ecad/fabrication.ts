@@ -5,13 +5,16 @@
  * 不需要在本插件里重写一遍写文件的格式。
  */
 
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { SubprocessService } from "../../types.js";
 import { runCapture } from "../subprocess-runner.js";
 import { ecadEnv, type EcadToolchain } from "./toolchain.js";
 import { exportStep } from "./checks.js";
+import { readBoardBox } from "./dfm.js";
+import { fillZones } from "./pcb/zone-fill.js";
+import { normalizePosCsv } from "./pcb/pos.js";
 
 export interface FabricationFile {
   readonly name: string;
@@ -27,6 +30,9 @@ export interface FabricationExport {
   readonly stepFile: string;
   readonly stepBytes: number;
   readonly posFile: string;
+  /** 平移到板左下角、Y 向上的贴片坐标（SMT 厂要的 CPL）。拿不到就为空串。 */
+  readonly cplFile: string;
+  readonly cplCount: number;
   readonly drillFiles: readonly FabricationFile[];
   readonly notes: readonly string[];
 }
@@ -91,6 +97,8 @@ export async function exportFabrication(
     stepFile: "",
     stepBytes: 0,
     posFile: "",
+    cplFile: "",
+    cplCount: 0,
     drillFiles: [],
     notes: [],
   };
@@ -102,6 +110,11 @@ export async function exportFabrication(
   mkdirSync(gerberDir, { recursive: true });
   const notes: string[] = [];
   const cwd = dirname(pcbFile);
+
+  // 先真重铺一次：kicad-cli 的 dry DRC refill 不落盘，不填就导出的 Gerber 覆铜是空心的。
+  const zones = await fillZones(subprocess, toolchain, pcbFile, signal);
+  for (const note of zones.notes) notes.push(note);
+  if (!zones.ok && zones.error !== "") notes.push(zones.error);
 
   const gerbers = await runExport(
     subprocess,
@@ -126,11 +139,31 @@ export async function exportFabrication(
   const pos = await runExport(
     subprocess,
     toolchain,
-    [toolchain.kicadCli, "pcb", "export", "pos", "-o", posFile, pcbFile],
+    [toolchain.kicadCli, "pcb", "export", "pos", "--format", "csv", "--units", "mm", "-o", posFile, pcbFile],
     cwd,
     signal,
   );
   if (!pos.ok) notes.push("贴片坐标导出失败：" + pos.error);
+
+  // CPL：KiCad 的 pos.csv 是页面坐标（Y 朝下、负数），平移成「板左下角、Y 向上」。
+  let cplFile = "";
+  let cplCount = 0;
+  if (pos.ok) {
+    try {
+      const box = readBoardBox(readFileSync(pcbFile, "utf8"));
+      const cpl = normalizePosCsv(readFileSync(posFile, "utf8"), box);
+      for (const note of cpl.notes) notes.push(note);
+      if (cpl.ok) {
+        cplFile = join(outDir, board + "-cpl.csv");
+        writeFileSync(cplFile, cpl.text, "utf8");
+        cplCount = cpl.rows.length;
+      } else if (cpl.error !== "") {
+        notes.push("CPL 没生成：" + cpl.error + "（原样保留 pos.csv）");
+      }
+    } catch (error) {
+      notes.push("CPL 没生成：" + (error instanceof Error ? error.message : String(error)) + "（原样保留 pos.csv）");
+    }
+  }
 
   const step = await exportStep(subprocess, toolchain, pcbFile, join(outDir, board + ".step"), signal);
   if (!step.ok) notes.push("STEP 导出失败：" + step.error);
@@ -147,6 +180,8 @@ export async function exportFabrication(
     stepFile: step.stepFile,
     stepBytes: step.bytes,
     posFile: pos.ok ? posFile : "",
+    cplFile,
+    cplCount,
     drillFiles,
     notes,
   };

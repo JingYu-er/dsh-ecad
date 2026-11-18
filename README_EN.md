@@ -70,7 +70,7 @@ Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the foo
 | `stm32_ecad_check` | ERC and DRC over the generated project, condensed with notes and DFM |
 | `stm32_ecad_libs` | extract embedded footprints/symbols into `hardware/libs` and register the tables |
 | `stm32_ecad_design` | nine-step pipeline including optional routing |
-| `stm32_ecad_step`, `stm32_ecad_export`, `stm32_ecad_package` | STEP; Gerber/drill/pos; delivery zip with self-check |
+| `stm32_ecad_step`, `stm32_ecad_export`, `stm32_ecad_package` | STEP; Gerber/drill/pos (pours are really re-filled through pcbnew before export, CPL shifted to the board origin, Y up); delivery zip with self-check |
 | `ecad_layout_fix` | put workspace and project config files back where they belong |
 
 ### Schematic

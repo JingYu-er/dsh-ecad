@@ -33,6 +33,9 @@ import { parseJlcpcbFootprints, vendorJlcpcbFootprints } from "../lib/engine/eca
 import { collectModelPaths, prepareModels3d, resolveModels, rewriteModelPaths } from "../lib/engine/ecad/models3d.js";
 import { exportFabrication } from "../lib/engine/ecad/fabrication.js";
 import { FAB_RULE_FLOOR, countCopperLayers, ensureDesignRules, fabFloorForLayers } from "../lib/engine/ecad/pcb/rules.js";
+import { jsonSafe } from "../lib/engine/json-safe.js";
+import { normalizePosCsv } from "../lib/engine/ecad/pcb/pos.js";
+import { ZONE_FILL_SCRIPT, parseZoneFillOutput } from "../lib/engine/ecad/pcb/zone-fill.js";
 import { parseMech, renderMechDxf, writeMechDxf } from "../lib/engine/ecad/pcb/mech.js";
 import { analyzeStackup } from "../lib/engine/ecad/pcb/stackup.js";
 import { analyzeEmc, defaultCurrentForNet, requiredWidthMm } from "../lib/engine/ecad/pcb/emc.js";
@@ -1034,6 +1037,8 @@ test("设计规则按层数取嘉立创常规档：多层 0.10、双层 0.127、
     assert.equal(parsed.net_settings.classes[0].via_diameter, 0.45);
     assert.equal(parsed.net_settings.classes[0].via_drill, 0.2);
     assert.equal(parsed.board.design_settings.rules.min_clearance, 0.1);
+    // 孔到铜单独取 0.2（嘉立创常规能力），不跟铜间距档走（S188）。
+    assert.equal(parsed.board.design_settings.rules.min_hole_clearance, 0.2);
     assert.match(four.changed.join(" "), /clearance/u);
 
     // 双层板：0.127 mm 档；显式传 FAB_RULE_FLOOR 时仍按 0.2 判。
@@ -2721,4 +2726,79 @@ test("3D 几何导出：GLB 与 STEP 的参数、缺模型说明与文件字节�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("无损 JSON：NaN/Infinity/undefined/BigInt 都收敛，缺测点变 null（S188）", () => {
+  const safe = jsonSafe({
+    ok: true,
+    voltage: Number.NaN,
+    current: Number.POSITIVE_INFINITY,
+    missing: undefined,
+    big: 123n,
+    when: new Date("2026-11-18T00:00:00.000Z"),
+    points: [{ x: 1, y: Number.NEGATIVE_INFINITY }, undefined],
+    nested: { keep: "yes", drop: undefined },
+  });
+  assert.equal(safe.voltage, null);
+  assert.equal(safe.current, null);
+  assert.equal("missing" in safe, false, "undefined 字段应被去掉");
+  assert.equal(safe.big, "123");
+  assert.equal(safe.when, "2026-11-18T00:00:00.000Z");
+  assert.equal(safe.points[0].y, null);
+  assert.equal(safe.points[1], null, "数组里的 undefined 变 null，下标不变");
+  assert.equal(safe.nested.keep, "yes");
+  assert.equal(JSON.stringify(safe).includes("Infinity"), false);
+});
+
+test("CPL：KiCad 的 pos.csv 平移到板左下角、Y 向上（S188）", () => {
+  const posText = [
+    "### Footprint positions - created on 2026-11-18 ###",
+    "## Unit = mm, Angle = deg.",
+    "# Ref     Val       Package                PosX       PosY       Rot  Side",
+    "C1,,chip,126.0000,-132.0000,0.0000,top",
+    "U1,,chip,110.0000,-100.0000,90.0000,top",
+    "R5,R_0402,R_0402,126.5000,-152.0000,180.0000,bottom",
+  ].join("\n");
+  const cpl = normalizePosCsv(posText, { x0: 100, y1: 152 });
+  assert.equal(cpl.ok, true);
+  assert.equal(cpl.rows.length, 3);
+  // pos 的 Y 已取反：y' = PosY + 板框上边缘（152），原点落在左下角。
+  assert.equal(cpl.rows[0].x, 26);
+  assert.equal(cpl.rows[0].y, 20);
+  assert.equal(cpl.rows[1].y, 52);
+  assert.equal(cpl.rows[2].y, 0);
+  assert.equal(cpl.rows[2].side, "bottom");
+  assert.match(cpl.text, /^Ref,Val,Package,PosX,PosY,Rot,Side/mu);
+  assert.match(cpl.notes.join(" "), /左下角/u);
+
+  // kicad-cli 的 --format csv 每个字段都带引号，不能把引号留在值里。
+  const quoted = normalizePosCsv('"C1","","chip","126.0000","-132.0000","0.0000","top"\n', { x0: 100, y1: 152 });
+  assert.equal(quoted.ok, true);
+  assert.equal(quoted.rows[0].ref, "C1");
+  assert.equal(quoted.rows[0].y, 20);
+  assert.match(quoted.text, /^C1,,chip,26,20,0,top$/mu);
+
+  // kicad-cli 默认输出 ascii（2+ 空格列），也要能读。
+  const asciiText = [
+    "### Footprint positions ###",
+    "# Ref     Val       Package                PosX       PosY       Rot  Side",
+    "C1                  chip               126.0000  -132.0000    0.0000  top",
+  ].join("\r\n");
+  const asciiCpl = normalizePosCsv(asciiText, { x0: 100, y1: 152 });
+  assert.equal(asciiCpl.ok, true);
+  assert.equal(asciiCpl.rows[0].y, 20);
+
+  const noBox = normalizePosCsv(posText, null);
+  assert.equal(noBox.ok, false);
+  assert.match(noBox.error, /板框/u, "读不到板框时不能猜偏移量");
+});
+
+test("铺铜填充：脚本用 ZONE_FILLER 并落盘，结果只认最后一行 JSON（S188）", () => {
+  assert.match(ZONE_FILL_SCRIPT, /ZONE_FILLER/u);
+  assert.match(ZONE_FILL_SCRIPT, /SaveBoard/u);
+  const parsed = parseZoneFillOutput('warn: nothing\n{"zones": 2, "filled": true, "error": ""}');
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.zones, 2);
+  assert.equal(parsed.filled, true);
+  assert.equal(parseZoneFillOutput("no json here").ok, false);
 });
