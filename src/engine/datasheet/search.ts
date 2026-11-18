@@ -37,10 +37,103 @@ export interface PartSearchResult {
   readonly ok: boolean;
   readonly error: string;
   readonly query: string;
+  readonly keyword: string;
+  readonly packageName: string;
   readonly total: number;
   readonly hits: readonly PartHit[];
+  readonly matched: number;
+  readonly unknownPackage: number;
+  readonly mismatched: number;
   readonly cached: boolean;
   readonly notes: readonly string[];
+}
+
+/** 封装判定：接口不一定回封装字段，所以「不符」与「判不出来」要分开。 */
+export type PackageVerdict = "match" | "unknown" | "mismatch";
+
+interface PackagePattern {
+  readonly canonical: string;
+  readonly query: RegExp;
+  readonly value: RegExp;
+}
+
+const GENERIC_PACKAGE =
+  /\b(SOP|SOIC|SSOP|TSSOP|MSOP|HSOP|QFN|DFN|LQFP|TQFP|QFP|BGA|DIP|SOT|TO|SOD|CSP|WLCSP|PLCC|LCC)[-_ ]?(\d{1,3})(?:[-_ ]?(\d))?\b/iu;
+const CHIP_SIZE = /\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b/u;
+
+const UNIT_VALUE = /^\d+(?:\.\d+)?(?:[pnuµmkKM]?[FfVvAaWwΩ]|R|K|M|RPM|Hz)$/u;
+
+/**
+ * 剩下这段文字还像不像一个型号。
+ *
+ * 只因为「查询里出现了封装」就把封装拿掉，`0603 100nF 50V` 会变成 `100nF 50V`——
+ * 立创的全文检索会把它当模糊词，返回一堆 MOS 管。所以只有剩下的词里确实有
+ * 「字母+数字混排、且不是单位量」的型号样式时，才把封装摘出去单独判。
+ */
+function looksLikePartName(text: string): boolean {
+  for (const token of text.split(/\s+/u)) {
+    const word = token.trim();
+    if (word === "") continue;
+    if (UNIT_VALUE.test(word)) continue;
+    if (!/[A-Za-z]/u.test(word) || !/\d/u.test(word)) continue;
+    if (word.length >= 4) return true;
+  }
+  return false;
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/** 从查询里认出封装：型号后面常跟着 `SOP8`、`SOT-23`、`0603`。认出的封装会从关键词里拿掉，用它单独判命中。 */
+export function parsePackageQuery(raw: string): { keyword: string; packageName: string } {
+  const text = raw.trim();
+  const generic = GENERIC_PACKAGE.exec(text);
+  if (generic !== null) {
+    const family = (generic[1] ?? "").toUpperCase();
+    const pins = generic[2] ?? "";
+    const suffix = generic[3] ?? "";
+    const canonical = family + "-" + pins + (suffix === "" ? "" : "-" + suffix);
+    const stripped = text.replace(generic[0], " ").replace(/\s+/gu, " ").trim();
+    // 摘掉封装后不像型号（例如 `100nF 50V`）就保留原查询：封装那一段对全文检索有用。
+    const keyword = stripped !== "" && looksLikePartName(stripped) ? stripped : text;
+    return { keyword, packageName: canonical };
+  }
+  const chip = CHIP_SIZE.exec(text);
+  if (chip !== null) {
+    const canonical = chip[1] ?? "";
+    const stripped = text.replace(chip[0], " ").replace(/\s+/gu, " ").trim();
+    const keyword = stripped !== "" && looksLikePartName(stripped) ? stripped : text;
+    return { keyword, packageName: canonical };
+  }
+  return { keyword: text, packageName: "" };
+}
+
+function packagePatternOf(canonical: string): PackagePattern | null {
+  const chip = CHIP_SIZE.exec(canonical);
+  if (chip !== null) {
+    return { canonical, query: new RegExp("\\b" + canonical + "\\b", "u"), value: new RegExp(canonical, "u") };
+  }
+  const generic = GENERIC_PACKAGE.exec(canonical);
+  if (generic === null) return null;
+  const family = (generic[1] ?? "").toUpperCase();
+  const pins = generic[2] ?? "";
+  // `SOT-23`、`SOP-8` 这类在封装名里可能写成 `SOT-23-3`、`SOIC-8`，也可能写成 `SOP8`；只要求族名与脚数都出现。
+  const value = new RegExp(escapeRegExp(family) + "[-_ ]?" + pins, "iu");
+  const query = new RegExp("\\b" + escapeRegExp(family) + "[-_ ]?" + pins, "iu");
+  return { canonical, query, value };
+}
+
+/** 判一条命中与目标封装的关系。封装字段空时退到型号/品类里找，都找不到就是「判不出来」。 */
+export function packageVerdict(hit: PartHit, canonical: string): PackageVerdict {
+  const pattern = packagePatternOf(canonical);
+  if (pattern === null) return "unknown";
+  const fields = [hit.packageName, hit.mpn, hit.category].filter((item) => item.trim() !== "");
+  if (fields.length === 0) return "unknown";
+  for (const field of fields) {
+    if (pattern.value.test(field)) return "match";
+  }
+  return hit.packageName.trim() === "" ? "unknown" : "mismatch";
 }
 
 export function searchCachePath(env: NodeJS.ProcessEnv): string {
@@ -123,6 +216,7 @@ export function parseProductList(payload: unknown): { total: number; hits: PartH
 }
 
 export interface SearchOptions {
+  readonly package?: string;
   readonly limit?: number;
   readonly page?: number;
   readonly ttlMs?: number;
@@ -137,22 +231,82 @@ export interface SearchOptions {
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
+const VERDICT_RANK: Record<PackageVerdict, number> = { match: 0, unknown: 1, mismatch: 2 };
+
+/**
+ * 按封装重排并按判据计数。
+ *
+ * 搜索接口不一定回 `encapStandard`（实测常常是 null），所以这里只做三件事：
+ * 明确匹配的排前面、判不出来的居中、明确不符的排最后；并把三个数写进结果。
+ * 「判不出来」不算失败——不能因为接口没给字段，就把可能正确的型号剔掉。
+ */
+function rankByPackage(result: PartSearchResult, notes: readonly string[]): PartSearchResult {
+  const pairs = result.hits.map((hit) => ({
+    hit,
+    verdict: result.packageName === "" ? ("unknown" as PackageVerdict) : packageVerdict(hit, result.packageName),
+  }));
+  if (result.packageName !== "") {
+    pairs.sort((left, right) => VERDICT_RANK[left.verdict] - VERDICT_RANK[right.verdict]);
+  }
+  const matched = pairs.filter((pair) => pair.verdict === "match").length;
+  const unknownPackage = pairs.filter((pair) => pair.verdict === "unknown").length;
+  const mismatched = pairs.filter((pair) => pair.verdict === "mismatch").length;
+  const merged = [...notes];
+  if (!looksLikePartName(result.keyword)) {
+    merged.push(
+      "这是参数式查询：立创的搜索是全文匹配，`100NF04` 这类型号也会命中 `100nF`；要缩小范围请直接给型号或立创编号，或到商品页按封装/容值筛。",
+    );
+  }
+  if (result.packageName !== "") {
+    if (matched === 0) {
+      merged.push(
+        "这一页没有封装明确匹配 " + result.packageName + " 的型号：接口回的封装字段常为空，请到商品页核对封装，或把封装写进型号关键词再搜一次",
+      );
+    } else {
+      merged.push(
+        "按封装 " + result.packageName + " 排序：明确匹配 " + String(matched) + " 条，接口没给封装 " + String(unknownPackage) + " 条（判不出来，未剔除），不符 " + String(mismatched) + " 条（排最后）",
+      );
+    }
+  }
+  return { ...result, hits: pairs.map((pair) => pair.hit), matched, unknownPackage, mismatched, notes: merged };
+}
+
 /** 搜一次；命中缓存直接回，不回网络。 */
 export async function searchParts(query: string, options: SearchOptions = {}): Promise<PartSearchResult> {
-  const keyword = query.trim();
+  const raw = query.trim();
+  const parsed = options.package !== undefined && options.package.trim() !== ""
+    ? { keyword: raw, packageName: options.package.trim() }
+    : parsePackageQuery(raw);
+  const keyword = parsed.keyword;
+  const packageName = parsed.packageName;
   const limit = Math.min(Math.max(Math.round(options.limit ?? 10), 1), 50);
   const page = Math.max(Math.round(options.page ?? 1), 1);
-  const empty: PartSearchResult = { ok: false, error: "", query: keyword, total: 0, hits: [], cached: false, notes: [] };
+  const empty: PartSearchResult = {
+    ok: false,
+    error: "",
+    query: raw,
+    keyword,
+    packageName,
+    total: 0,
+    hits: [],
+    matched: 0,
+    unknownPackage: 0,
+    mismatched: 0,
+    cached: false,
+    notes: [],
+  };
   if (keyword === "") return { ...empty, error: "搜索关键词不能为空：给型号、参数或立创编号，例如 `STM32F103C8T6`、`0603 100nF`" };
 
   const file = options.cacheFile ?? searchCachePath(process.env);
-  const key = String(limit) + "|" + String(page) + "|" + keyword.toLowerCase();
+  // 没有封装过滤时沿用旧的缓存键，老缓存仍然有效；带封装才加第四段。
+  const baseKey = String(limit) + "|" + String(page) + "|" + keyword.toLowerCase();
+  const key = packageName === "" ? baseKey : baseKey + "|" + packageName.toLowerCase();
   const now = options.now ?? (() => Date.now());
   if (options.noCache !== true && existsSync(file)) {
     const cache = readCache(file);
     const hit = cache.entries[key];
     if (hit !== undefined && now() - hit.at < (options.ttlMs ?? DEFAULT_TTL_MS)) {
-      return { ok: true, error: "", query: keyword, total: hit.total, hits: hit.hits, cached: true, notes: ["这一页来自本地缓存（24 小时内有效）"] };
+      return rankByPackage({ ...empty, ok: true, total: hit.total, hits: hit.hits, cached: true }, ["这一页来自本地缓存（24 小时内有效）"]);
     }
   }
 
@@ -178,18 +332,18 @@ export async function searchParts(query: string, options: SearchOptions = {}): P
     const payload = (await response.json()) as { code?: unknown; msg?: unknown };
     const code = num(payload.code);
     if (code !== 200) return { ...empty, error: "立创搜索接口回了错误码 " + String(code) + "：" + str(payload.msg) };
-    const parsed = parseProductList(payload);
+    const pageHits = parseProductList(payload);
     const notes: string[] = [];
-    if (parsed.hits.length === 0) notes.push("没有匹配结果：试试去掉封装或电压，只留型号主体");
-    if (parsed.total > 0) notes.push("共 " + String(parsed.total) + " 条匹配，这里只给前 " + String(parsed.hits.length) + " 条");
+    if (pageHits.hits.length === 0) notes.push("没有匹配结果：试试去掉封装或电压，只留型号主体");
+    if (pageHits.total > 0) notes.push("共 " + String(pageHits.total) + " 条匹配，这里只给前 " + String(pageHits.hits.length) + " 条");
     const cache = readCache(file);
-    cache.entries[key] = { at: now(), total: parsed.total, hits: parsed.hits };
+    cache.entries[key] = { at: now(), total: pageHits.total, hits: pageHits.hits };
     const keys = Object.keys(cache.entries);
     if (keys.length > 200) {
       for (const stale of keys.slice(0, keys.length - 200)) delete cache.entries[stale];
     }
     writeCache(file, cache);
-    return { ok: true, error: "", query: keyword, total: parsed.total, hits: parsed.hits, cached: false, notes };
+    return rankByPackage({ ...empty, ok: true, total: pageHits.total, hits: pageHits.hits, cached: false }, notes);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return { ...empty, error: controller.signal.aborted ? "搜索超时或已取消：" + reason : "搜索失败：" + reason };

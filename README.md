@@ -120,7 +120,7 @@ dsh plugin --profile desktop add dsh-ecad
 | 工具 | 说明 |
 | --- | --- |
 | `stm32_part_import` | 按 `Lib:Name` 导入封装（KiCad 库优先，`source=lcsc` 可强制立创），生成符号骨架，3D 模型一并收进工程 |
-| `ecad_part_search` | 型号/参数/立创编号搜索：库存、起订、阶梯价（接口不给封装字段就如实说） |
+| `ecad_part_search` | 型号/参数/立创编号搜索：库存、起订、阶梯价；查询里带封装（`TP4056 SOP8`、`S8050 SOT-23`）会单独判并排序——明确匹配在前，接口没给封装的单列不剔除，不符的排最后 |
 | `ecad_ds_fetch` / `ecad_ds_list` / `ecad_ds_lookup` | 立创手册下载与缓存、清单、按用途查页 |
 | `ecad_pdf_read` | PDF：文字、表格、图、页面渲染、曲线数字化、原理图 PDF 元件清单 |
 

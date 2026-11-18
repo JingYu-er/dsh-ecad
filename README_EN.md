@@ -109,7 +109,7 @@ Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the foo
 
 ### Parts and datasheets
 
-`stm32_part_import`, `ecad_part_search`, `ecad_ds_fetch`, `ecad_ds_list`, `ecad_ds_lookup`, `ecad_pdf_read`.
+`stm32_part_import`, `ecad_part_search` (a package token in the query such as `SOP8`/`SOT-23` is parsed out and ranked: matches first, unknown-package kept, mismatches last), `ecad_ds_fetch`, `ecad_ds_list`, `ecad_ds_lookup`, `ecad_pdf_read`.
 
 ## Hardware console
 

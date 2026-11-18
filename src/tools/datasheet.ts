@@ -375,7 +375,8 @@ export function registerDatasheetTools(ctx: DshContext): void {
       type: "object",
       additionalProperties: false,
       properties: {
-        query: { type: "string", description: "搜索关键词：型号（STM32F103C8T6）、参数（0603 100nF 50V）或立创编号（C8734）。" },
+        query: { type: "string", description: "搜索关键词：型号（STM32F103C8T6）、参数（0603 100nF 50V）或立创编号（C8734）；也可以把封装一并写进来（TP4056 SOP8、S8050 SOT-23），会被单独解析。" },
+        package: { type: "string", description: "封装过滤：SOP-8、SOT-23、0603、QFN-24 之类。省略时从 query 里自动认；明确匹配的排前面，接口没给封装的单列（不剔除），不符的排最后。" },
         limit: { type: "number", description: "返回条数，默认 10，最多 50。" },
         page: { type: "number", description: "第几页，从 1 开始。" },
         refresh: { type: "boolean", description: "跳过本地缓存，重新联网。" },
@@ -390,7 +391,12 @@ export function registerDatasheetTools(ctx: DshContext): void {
           ok: { type: "boolean" },
           error: { type: "string" },
           query: { type: "string" },
+          keyword: { type: "string" },
+          packageName: { type: "string" },
           total: { type: "number" },
+          matched: { type: "number" },
+          unknownPackage: { type: "number" },
+          mismatched: { type: "number" },
           cached: { type: "boolean" },
           hits: {
             type: "array",
@@ -435,7 +441,7 @@ export function registerDatasheetTools(ctx: DshContext): void {
           },
           notes: { type: "array", items: { type: "string" } },
         },
-        required: ["ok", "error", "query", "total", "cached", "hits", "notes"],
+        required: ["ok", "error", "query", "keyword", "packageName", "total", "matched", "unknownPackage", "mismatched", "cached", "hits", "notes"],
       },
       render: (_args, value) => {
         const result = value as PartSearchResult;
@@ -443,6 +449,11 @@ export function registerDatasheetTools(ctx: DshContext): void {
         const lines = [
           "「" + result.query + "」共 " + String(result.total) + " 条匹配" + (result.cached ? "（来自本地缓存）" : ""),
         ];
+        if (result.packageName !== "") {
+          lines.push(
+            "封装 " + result.packageName + "：明确匹配 " + String(result.matched) + " 条 · 判不出来 " + String(result.unknownPackage) + " 条 · 不符 " + String(result.mismatched) + " 条",
+          );
+        }
         for (const hit of result.hits) {
           const money = hit.priceUsd > 0 ? "$" + hit.priceUsd.toFixed(4) : "无报价";
           const pkg = hit.packageName === "" ? "" : " · " + hit.packageName;
@@ -458,16 +469,30 @@ export function registerDatasheetTools(ctx: DshContext): void {
     timeoutMs: 40_000,
     isConcurrencySafe: () => true,
     execute: async (
-      args: { query?: string; limit?: number; page?: number; refresh?: boolean } | undefined,
+      args: { query?: string; package?: string; limit?: number; page?: number; refresh?: boolean } | undefined,
       exec: ToolExec,
     ) => {
       const env = process.env;
       const query = typeof args?.query === "string" ? args.query : "";
       const offline = (env["DSH_STM32_OFFLINE"] ?? "").trim() === "1";
       if (offline) {
-        return { ok: false, error: "离线模式（DSH_STM32_OFFLINE=1）下不能搜索：这是联网查询", query, total: 0, cached: false, hits: [], notes: [] };
+        return {
+          ok: false,
+          error: "离线模式（DSH_STM32_OFFLINE=1）下不能搜索：这是联网查询",
+          query,
+          keyword: query,
+          packageName: "",
+          total: 0,
+          matched: 0,
+          unknownPackage: 0,
+          mismatched: 0,
+          cached: false,
+          hits: [],
+          notes: [],
+        };
       }
       const result = await searchParts(query, {
+        ...(typeof args?.package === "string" && args.package.trim() !== "" ? { package: args.package } : {}),
         ...(typeof args?.limit === "number" ? { limit: args.limit } : {}),
         ...(typeof args?.page === "number" ? { page: args.page } : {}),
         ...(args?.refresh === true ? { noCache: true } : {}),
@@ -477,6 +502,11 @@ export function registerDatasheetTools(ctx: DshContext): void {
       const notes = [...result.notes];
       if (result.hits.length > 0 && result.hits.every((hit: PartHit) => hit.packageName === "")) {
         notes.push("接口没给封装字段：封装要去商品页或手册确认，别按型号猜。");
+      }
+      if (result.packageName !== "" && result.unknownPackage > 0) {
+        notes.push(
+          "判不出来的 " + String(result.unknownPackage) + " 条没有剔除：接口不回封装不等于封装不对，点进商品页核对即可。",
+        );
       }
       return { ...result, notes };
     },

@@ -1126,7 +1126,9 @@ export async function handleWebApi(input: {
     if (q === "") return fail(400, "q 不能为空：给型号、参数或立创编号，例如 C8734、0603 100nF");
     const limitRaw = Number(query["limit"] ?? "10");
     const pageRaw = Number(query["page"] ?? "1");
+    const packageName = typeof query["package"] === "string" ? query["package"].trim() : "";
     const result = await searchParts(q, {
+      ...(packageName === "" ? {} : { package: packageName }),
       limit: Number.isFinite(limitRaw) ? limitRaw : 10,
       page: Number.isFinite(pageRaw) ? pageRaw : 1,
       ...(query["refresh"] === "1" ? { noCache: true } : {}),
@@ -1142,7 +1144,12 @@ export async function handleWebApi(input: {
         ok: result.ok,
         error: result.error,
         query: result.query,
+        keyword: result.keyword,
+        packageName: result.packageName,
         total: result.total,
+        matched: result.matched,
+        unknownPackage: result.unknownPackage,
+        mismatched: result.mismatched,
         cached: result.cached,
         hits: result.hits,
         notes,

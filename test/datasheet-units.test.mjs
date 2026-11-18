@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 
 import { parseLcscPage } from "../lib/engine/datasheet/lcsc.js";
 import { detectSections } from "../lib/engine/datasheet/digest.js";
-import { parseProductList, searchParts } from "../lib/engine/datasheet/search.js";
+import { packageVerdict, parsePackageQuery, parseProductList, searchParts } from "../lib/engine/datasheet/search.js";
 import {
   ensureDatasheet,
   importDatasheetFile,
@@ -258,4 +258,58 @@ test("器件搜索：按接口字段削成 PartHit，缓存命中就不联网，
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("器件搜索：查询里的封装会被单独解析，判不出来的不剔除、不符的排最后（S189）", async () => {
+  // 三种查询写法都要认：型号后跟封装、带连字符、贴片尺寸。
+  assert.deepEqual(parsePackageQuery("TP4056 SOP8"), { keyword: "TP4056", packageName: "SOP-8" });
+  assert.deepEqual(parsePackageQuery("S8050 SOT-23"), { keyword: "S8050", packageName: "SOT-23" });
+  // 剩下来的「100nF」是单位量、不像型号：保留原查询，别把封装那段从检索词里拿掉。
+  assert.deepEqual(parsePackageQuery("0603 100nF"), { keyword: "0603 100nF", packageName: "0603" });
+  assert.deepEqual(parsePackageQuery("STM32F103C8T6"), { keyword: "STM32F103C8T6", packageName: "" });
+
+  const hit = (over) => ({
+    code: "C1",
+    mpn: "TP4056",
+    brand: "X",
+    packageName: "",
+    stock: 1,
+    minBuy: 1,
+    priceUsd: 0.01,
+    ladder: [{ qty: 1, priceUsd: 0.01 }],
+    category: "",
+    datasheetUrl: "",
+    inStock: true,
+    ...over,
+  });
+  // 封装字段明确写 SOP-8 → 匹配；写成 SOP-8_5.0x3.9mm 也认；只有型号没有封装 → 判不出来。
+  assert.equal(packageVerdict(hit({ packageName: "SOP-8_5.0x3.9mm" }), "SOP-8"), "match");
+  assert.equal(packageVerdict(hit({ packageName: "SOT-23-3" }), "SOP-8"), "mismatch");
+  assert.equal(packageVerdict(hit({}), "SOP-8"), "unknown");
+
+  const html = JSON.stringify({
+    code: 200,
+    result: {
+      totalCount: 3,
+      productList: [
+        { productCode: "C111", productModel: "TP4056", brandNameEn: "X", encapStandard: "SOT-23-6", stockNumber: 5, minBuyNumber: 1, productPriceList: [{ ladder: 1, usdPrice: 0.02 }] },
+        { productCode: "C222", productModel: "TP4056", brandNameEn: "Y", encapStandard: "", stockNumber: 6, minBuyNumber: 1, productPriceList: [{ ladder: 1, usdPrice: 0.03 }] },
+        { productCode: "C333", productModel: "TP4056", brandNameEn: "Z", encapStandard: "SOP-8_5.0x3.9mm", stockNumber: 7, minBuyNumber: 1, productPriceList: [{ ladder: 1, usdPrice: 0.04 }] },
+      ],
+    },
+  });
+  const cacheFile = join(mkdtempSync(join(tmpdir(), "dsh-parts-pkg-")), "search.json");
+  const result = await searchParts("TP4056 SOP8", {
+    cacheFile,
+    fetchImpl: async () => new Response(html, { status: 200, headers: { "content-type": "application/json" } }),
+  });
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.keyword, "TP4056");
+  assert.equal(result.packageName, "SOP-8");
+  assert.equal(result.matched, 1);
+  assert.equal(result.unknownPackage, 1);
+  assert.equal(result.mismatched, 1);
+  // 排序：匹配 → 判不出来 → 不符。
+  assert.deepEqual(result.hits.map((item) => item.code), ["C333", "C222", "C111"]);
+  assert.ok(result.notes.some((note) => note.includes("判不出来")), result.notes.join(" / "));
 });
