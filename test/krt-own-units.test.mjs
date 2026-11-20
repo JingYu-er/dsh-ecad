@@ -41,4 +41,7 @@ test("自有规则布线：铜层数从 (layers …) 里数，读不到按 2 层
   assert.equal(copperLayersOf('(layers "F.Cu" "In1.Cu" "In2.Cu" "B.Cu")'), 4);
   assert.equal(copperLayersOf('(layers "F.Cu" "B.Cu")'), 2);
   assert.equal(copperLayersOf("(kicad_pcb)"), 2);
+  // KiCad 真文件的层表是跨行嵌套的，按 [^)]* 截只会抓到一半
+  const multiline = '(kicad_pcb (layers\n  (0 "F.Cu" signal)\n  (2 "B.Cu" signal)\n  (5 "F.SilkS" user)\n))';
+  assert.equal(copperLayersOf(multiline), 2);
 });

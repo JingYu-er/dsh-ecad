@@ -52,13 +52,29 @@ export interface OwnRuleRequest {
 }
 
 
-/** 板上铜层数：从 `(layers ...)` 里数 F/B/In*.Cu，读不到按 2 层。 */
+/** 按括号配平从 `(layers` 处取整块（KiCad 的层表是跨行的，不能按 `[^)]*` 截）。 */
+function layersBlock(pcbText: string): string {
+  const start = pcbText.indexOf("(layers");
+  if (start < 0) return "";
+  let depth = 0;
+  for (let i = start; i < pcbText.length; i += 1) {
+    const ch = pcbText[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) return pcbText.slice(start, i + 1);
+    }
+  }
+  return "";
+}
+
+/** 板上铜层数：从层表里数 F/B/In*.Cu（去重），读不到按 2 层。 */
 export function copperLayersOf(pcbText: string): number {
-  const block = /\(layers\s+([^)]*)\)/u.exec(pcbText);
-  if (block === null) return 2;
-  const names = block[1] ?? "";
-  const matched = names.match(/"(?:F|B|In\d+)\.Cu"/gu);
-  return matched === null ? 2 : matched.length;
+  const block = layersBlock(pcbText);
+  if (block === "") return 2;
+  const names = new Set<string>();
+  for (const match of block.matchAll(/"(F|B|In\d+)\.Cu"/gu)) names.add(match[0]);
+  return names.size === 0 ? 2 : names.size;
 }
 
 export interface OwnRuleReport {
