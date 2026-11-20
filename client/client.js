@@ -24,7 +24,7 @@ window.__ModuleLoader__.load({
      */
 
     const React = require("react");
-    const { useCallback, useEffect, useState } = React;
+    const { useCallback, useEffect, useRef, useState } = React;
 
     /* ------------------------------ 接口层 ------------------------------ */
 
@@ -2002,6 +2002,136 @@ function usePower(projectDir) {
   return { power: power, error: error };
 }
 
+/** 面板里的小偏好（视图模式之类）：读了失败就用默认值，不抛。 */
+function loadPref(key, fallback) {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return typeof raw === "string" && raw !== "" ? raw : fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function savePref(key, value) {
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch (error) {
+    void error;
+  }
+}
+
+/* 板子的 3D 草图（S209）：只用几何包围盒 + 正交投影 + 画家算法，不引入 three.js。
+ * 拖动改俯仰与旋转，滚轮缩放；元件高度是估的（见 pcb-3d.ts），所以标「估高」。 */
+function Pcb3D(props) {
+  const canvasRef = useRef(null);
+  const dragRef = useRef(null);
+  const [angle, setAngle] = useState({ yaw: -0.6, pitch: 0.9, zoom: 1 });
+  const board = props.board;
+  const boxes = props.boxes;
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null || board === null || board === undefined) return;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) return;
+    const ratio = window.devicePixelRatio || 1;
+    const widthPx = canvas.clientWidth || 720;
+    const heightPx = Math.max(260, Math.round(widthPx * 0.62));
+    canvas.width = Math.round(widthPx * ratio);
+    canvas.height = Math.round(heightPx * ratio);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, widthPx, heightPx);
+    const spanX = Math.max(1, board.x1 - board.x0);
+    const spanY = Math.max(1, board.y1 - board.y0);
+    const scale = (Math.min(widthPx / (spanX + spanY * 0.6), heightPx / (spanY + spanX * 0.6)) * 0.9) * angle.zoom;
+    const cx = (board.x0 + board.x1) / 2;
+    const cy = (board.y0 + board.y1) / 2;
+    const cosYaw = Math.cos(angle.yaw);
+    const sinYaw = Math.sin(angle.yaw);
+    const cosPitch = Math.cos(angle.pitch);
+    const sinPitch = Math.sin(angle.pitch);
+    // 正交投影：先把板面绕 z 转 yaw，再绕 x 抬 pitch；返回值里 depth 用来排序。
+    const project = (x, y, z) => {
+      const dx = x - cx;
+      const dy = y - cy;
+      const rx = dx * cosYaw - dy * sinYaw;
+      const ry = dx * sinYaw + dy * cosYaw;
+      const sy = ry * cosPitch - z * sinPitch;
+      return { px: widthPx / 2 + rx * scale, py: heightPx / 2 + sy * scale, depth: ry * sinPitch + z * cosPitch };
+    };
+    const faces = [];
+    const boardFaces = [];
+    const pushBox = (x0, y0, x1, y1, z0, z1, color, onBoard) => {
+      const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map((p) => p.map((v, i) => (i === 0 ? v : v)));
+      const top = corners.map((p) => project(p[0], p[1], z1));
+      const bottom = corners.map((p) => project(p[0], p[1], z0));
+      const sink = onBoard === true ? boardFaces : faces;
+      sink.push({ points: top, depth: top.reduce((sum, p) => sum + p.depth, 0) / 4, color: color[0] });
+      for (let i = 0; i < 4; i += 1) {
+        const j = (i + 1) % 4;
+        const quad = [bottom[i], bottom[j], top[j], top[i]];
+        sink.push({ points: quad, depth: quad.reduce((sum, p) => sum + p.depth, 0) / 4, color: color[1] });
+      }
+    };
+    // 板子先画、元件后画：板面是 z=0..thickness 的薄片，和元件一起按画家算法排序时，
+    // 远端的板面会被排到近端元件之后，把元件盖住（S209 第一版就这样）。
+    pushBox(board.x0, board.y0, board.x1, board.y1, 0, board.thicknessMm, ["#1f6f3f", "#154c2c"], true);
+    const palette = { ic: ["#333a44", "#22262c"], small: ["#7a5f2e", "#58441f"], connector: ["#8a8a8a", "#616161"] };
+    for (const box of boxes) {
+      const group = box.heightMm >= 1.5 ? "ic" : box.heightMm >= 1 ? "connector" : "small";
+      // 元件坐在板面上，不是插在板子中间：底面在 z=thickness，顶面再加高度。
+      const base = board.thicknessMm;
+      pushBox(box.x0, box.y0, box.x1, box.y1, box.side === "B" ? -box.heightMm : base, box.side === "B" ? 0 : base + box.heightMm, palette[group]);
+    }
+    boardFaces.sort((a, b) => b.depth - a.depth);
+    faces.sort((a, b) => b.depth - a.depth);
+    for (const face of boardFaces.concat(faces)) {
+      ctx.beginPath();
+      ctx.moveTo(face.points[0].px, face.points[0].py);
+      for (let i = 1; i < face.points.length; i += 1) ctx.lineTo(face.points[i].px, face.points[i].py);
+      ctx.closePath();
+      ctx.fillStyle = face.color;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.35)";
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.font = "11px ui-monospace, monospace";
+    ctx.fillText("3D 草图 · 拖动画布旋转 · 滚轮缩放 · " + String(boxes.length) + " 个元件（高度为估计值）", 8, heightPx - 8);
+  }, [board, boxes, angle]);
+  const drag = (event) => {
+    const start = dragRef.current;
+    if (start === null) return;
+    setAngle(Object.assign({}, angle, {
+      yaw: start.yaw + (event.clientX - start.x) * 0.01,
+      pitch: Math.max(0.2, Math.min(1.5, start.pitch + (event.clientY - start.y) * 0.006)),
+    }));
+  };
+  return e(
+    "canvas",
+    {
+      ref: canvasRef,
+      style: { width: "100%", display: "block", cursor: "grab", touchAction: "none" },
+      onMouseDown: (event) => {
+        dragRef.current = { x: event.clientX, y: event.clientY, yaw: angle.yaw, pitch: angle.pitch };
+        event.currentTarget.style.cursor = "grabbing";
+      },
+      onMouseMove: drag,
+      onMouseUp: (event) => {
+        dragRef.current = null;
+        event.currentTarget.style.cursor = "grab";
+      },
+      onMouseLeave: () => {
+        dragRef.current = null;
+      },
+      onWheel: (event) => {
+        event.preventDefault();
+        setAngle(Object.assign({}, angle, { zoom: Math.max(0.3, Math.min(4, angle.zoom * (event.deltaY > 0 ? 0.92 : 1.08))) }));
+      },
+    },
+  );
+}
+
 // 板图（S151）：只读 .kicad_pcb 出 SVG，按层取图；切换层或点刷新才重新请求。
 function usePcbView(projectDir, show) {
   const [view, setView] = useState(null);
@@ -2069,6 +2199,7 @@ function EcadPanel(props) {
       const projectDir = typeof props.projectDir === "string" ? props.projectDir : "";
       const state = useEcad(projectDir, 20000);
       const [pcbShow, setPcbShow] = useState({ top: true, bottom: true, pads: true, vias: true, silk: true, edge: true, refs: false });
+      const [pcbMode, setPcbMode] = useState(loadPref("dsh-ecad-pcb-mode", "2d"));
       const pcb = usePcbView(projectDir, pcbShow);
       const [bomPrices, setBomPrices] = useState(false);
       const bom = useBom(projectDir, bomPrices);
@@ -2283,6 +2414,20 @@ function EcadPanel(props) {
               pair[1],
             ),
           ),
+          e(
+            "button",
+            {
+              key: "pcb-mode",
+              type: "button",
+              onClick: () => {
+                const next = pcbMode === "3d" ? "2d" : "3d";
+                setPcbMode(next);
+                savePref("dsh-ecad-pcb-mode", next);
+              },
+              style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px", fontWeight: pcbMode === "3d" ? 600 : 400 }),
+            },
+            pcbMode === "3d" ? "3D 视图" : "2D 视图",
+          ),
           e("button", { key: "pcb-refresh", type: "button", onClick: () => pcb.reload(), style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px" }) }, "刷新"),
           e("button", { key: "pcb-ipc", type: "button", onClick: checkIpc, style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px" }) }, "连接 KiCad"),
           ipc === null
@@ -2301,6 +2446,12 @@ function EcadPanel(props) {
             ? e("div", { key: "pcb-err", style: { fontSize: "12px", color: "var(--dsw-alias-state-error-primary)" } }, pcb.error)
             : pcbView === null
               ? e("div", { key: "pcb-loading", style: { fontSize: "12px", opacity: 0.6 } }, "读取板图…")
+              : pcbMode === "3d" && pcbView.board3d !== null && pcbView.board3d !== undefined
+                ? e(
+                    "div",
+                    { key: "pcb-3d", className: "d32-pcb-figure", style: { border: D32_HAIR, background: "var(--dsw-alias-bg-layer-2)", padding: "6px" } },
+                    e(Pcb3D, { key: "pcb3d-canvas", board: pcbView.board3d, boxes: pcbView.boxes || [] }),
+                  )
               : pcbView.ok
                 ? e(
                     "div",

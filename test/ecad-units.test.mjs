@@ -48,6 +48,7 @@ import { collectBriefFacts, writeBriefs } from "../lib/engine/ecad/brief.js";
 import { analyzePowerBudget } from "../lib/engine/ecad/pcb/power.js";
 import { parsePcbScene, readPcbScene } from "../lib/engine/ecad/pcb/scene.js";
 import { renderPcbSvg } from "../lib/engine/ecad/pcb/pcb-svg.js";
+import { boardBox3, componentBoxes } from "../lib/engine/ecad/pcb/pcb-3d.js";
 import { coincidentGroups, collectKicadFootprintRefs, parseKicadModPads } from "../lib/engine/ecad/padprecheck.js";
 import { mergeCoincidentPads } from "../lib/engine/ecad/padmerge.js";
 import { applyQuotes, buildBom, renderBomCsv, renderBomMarkdown } from "../lib/engine/ecad/bom.js";
@@ -1271,6 +1272,45 @@ test("网络表：只有焊盘内联网络时补顶层声明，编号不重复�
   assert.match(first.text, /\(net 8 "GND"\)|"GND"\)\s*\n\t\(net 9/u);
   const second = assignNetIds(first.text);
   assert.equal(second.text, first.text, "再跑一次不该有变化");
+});
+
+test("板子 3D 骨架：按位号聚成包围盒，板厚从 (general (thickness)) 来（S209）", () => {
+  const lines = [
+    "(kicad_pcb (version 20241229)",
+    "  (general (thickness 1.2))",
+    '  (layers (0 "F.Cu" signal) (31 "B.Cu" signal))',
+    '  (footprint "a" (layer F.Cu) (at 5 5 0) (property "Reference" "U1" (at 0 0 0))',
+    '    (pad "1" smd rect (at -2 0 0) (size 1 1) (layers F.Cu F.Mask))',
+    '    (pad "2" smd rect (at 2 0 0) (size 1 1) (layers F.Cu F.Mask))',
+    '    (pad "3" smd rect (at 0 2 0) (size 1 1) (layers F.Cu F.Mask))',
+    '    (pad "4" smd rect (at 0 -2 0) (size 1 1) (layers F.Cu F.Mask))',
+    '    (pad "5" smd rect (at -2 2 0) (size 1 1) (layers F.Cu F.Mask))',
+    '    (pad "6" smd rect (at 2 2 0) (size 1 1) (layers F.Cu F.Mask))',
+    "  )",
+    '  (footprint "b" (layer B.Cu) (at 12 6 0) (property "Reference" "C1" (at 0 0 0))',
+    '    (pad "1" smd rect (at -1 0 0) (size 0.8 0.8) (layers B.Cu B.Mask))',
+    '    (pad "2" smd rect (at 1 0 0) (size 0.8 0.8) (layers B.Cu B.Mask))',
+    "  )",
+    ")",
+  ];
+  const scene = parsePcbScene(lines.join("\n"), "board.kicad_pcb");
+  assert.equal(scene.ok, true, scene.error);
+  const boxes = componentBoxes(scene);
+  assert.equal(boxes.length, 2);
+  const six = boxes.find((box) => box.ref === "U1");
+  assert.ok(six !== undefined);
+  assert.equal(six.heightMm, 1.2);
+  assert.equal(six.side, "F");
+  // 包围盒 = 焊盘外沿（中心 ±2、半径 0.5）再加 0.25 mm 余量。
+  assert.ok(Math.abs(six.x0 - (5 - 2 - 0.5 - 0.25)) < 0.001, String(six.x0));
+  assert.ok(Math.abs(six.y1 - (5 + 2 + 0.5 + 0.25)) < 0.001, String(six.y1));
+  const two = boxes.find((box) => box.ref === "C1");
+  assert.equal(two.heightMm, 0.6);
+  assert.equal(two.side, "B");
+  const board = boardBox3(scene);
+  assert.ok(board !== null);
+  assert.ok(Math.abs(board.x1 - board.x0 - scene.bbox.width) < 0.001);
+  assert.equal(board.thicknessMm, 1.6);
 });
 
 test("板图：解析 .kicad_pcb 出焊盘/走线/过孔/板框与内层说明（S151）", () => {

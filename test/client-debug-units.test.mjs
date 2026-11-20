@@ -267,6 +267,10 @@ test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲
   assert.ok(source.includes("\"ecad/pcb?\""));
   assert.ok(source.includes("\"板图\""));
   assert.ok(source.includes("d32-pcb-figure"));
+  // 3D 草图（S209）：只要求几何、客户端画；拖动旋转、滚轮缩放、模式落 localStorage。
+  assert.ok(source.includes("function Pcb3D("), source.length);
+  assert.ok(source.includes("dsh-ecad-pcb-mode"));
+  assert.ok(source.includes("e(Pcb3D, "));
   assert.ok(source.includes("连接 KiCad"), "面板要能手动探一次 IPC 连接");
   assert.ok(source.includes('"ecad/ipc?open=1"'), "连不上时请求带 open=1，让插件自己把 KiCad 打开");
   assert.ok(source.includes("reply.value.ipc"), "callApi 已经把回包包进 value，读 ipc 必须先解包");

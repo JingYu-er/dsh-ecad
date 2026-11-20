@@ -65,6 +65,7 @@ import { copperLayersOf, effectiveRouteSpec, planeAssignment, runOwnRulePlanes, 
 import { routingPreset } from "./ecad/pcb/fab-tier.js";
 import { connectPcbIpc } from "./ecad/pcb/ipc.js";
 import { renderPcbSvg } from "./ecad/pcb/pcb-svg.js";
+import { boardBox3, componentBoxes } from "./ecad/pcb/pcb-3d.js";
 import { fillZones } from "./ecad/pcb/zone-fill.js";
 import { applyQuotes, readBom } from "./ecad/bom.js";
 import { analyzeStackup, DEFAULT_TARGETS } from "./ecad/pcb/stackup.js";
@@ -1685,6 +1686,8 @@ export async function handleWebApi(input: {
       innerTracks: 0,
       vias: 0,
       elements: 0,
+      board3d: null as { x0: number; y0: number; x1: number; y1: number; thicknessMm: number } | null,
+      boxes: [] as { ref: string; x0: number; y0: number; x1: number; y1: number; heightMm: number; side: string; estimated: boolean }[],
       notes: [] as string[],
     };
     if (board === "") return ok({ pcbView: emptyPcbView });
@@ -1704,8 +1707,12 @@ export async function handleWebApi(input: {
         refs: query["refs"] === "1",
       },
     });
+    // 3D（S209）：只用几何，不引入渲染引擎——客户端拿包围盒自己画。
+    const thickness = Number((/\(general[\s\S]{0,200}?\(thickness ([\d.]+)\)/u.exec(readFileSync(board, "utf8")) ?? [])[1] ?? Number.NaN);
     return ok({
       pcbView: {
+        board3d: boardBox3(scene, Number.isFinite(thickness) && thickness > 0 ? thickness : 1.6),
+        boxes: componentBoxes(scene),
         ok: rendered.ok,
         error: rendered.error,
         file: board,

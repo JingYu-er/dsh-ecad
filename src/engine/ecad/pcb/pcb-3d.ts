@@ -16,7 +16,7 @@ export interface ComponentBox3 {
   readonly y1: number;
   /** 估算高度（mm）。 */
   readonly heightMm: number;
-  readonly side: "top" | "bottom";
+  readonly side: "F" | "B";
   readonly estimated: true;
 }
 
@@ -31,17 +31,16 @@ export interface BoardBox3 {
 
 const PAD_PAD_MM = 0.25;
 
-/** 估高度：先看焊盘面积与数量，再看位号前缀。 */
-function estimateHeight(padCount: number, maxPad: number): number {
+/** 估高度：只看焊盘数量。两脚件（阻容、二极管）最薄，多脚 IC 最厚。 */
+function estimateHeight(padCount: number): number {
   if (padCount >= 16) return 1.6;
   if (padCount >= 6) return 1.2;
-  if (maxPad >= 1.4) return 2.5;
-  if (maxPad >= 1.0) return 1.0;
-  return 0.5;
+  if (padCount === 2) return 0.6;
+  return 1;
 }
 
 export function componentBoxes(scene: PcbScene): ComponentBox3[] {
-  const groups = new Map<string, { x0: number; y0: number; x1: number; y1: number; count: number; maxPad: number; side: "top" | "bottom" }>();
+  const groups = new Map<string, { x0: number; y0: number; x1: number; y1: number; count: number; side: "F" | "B" }>();
   for (const pad of scene.pads) {
     if (pad.ref === "") continue;
     const halfW = Math.max(pad.width, 0.2) / 2;
@@ -54,8 +53,7 @@ export function componentBoxes(scene: PcbScene): ComponentBox3[] {
         x1: pad.x + halfW,
         y1: pad.y + halfH,
         count: 1,
-        maxPad: Math.max(pad.width, pad.height),
-        side: pad.side === "bottom" ? "bottom" : "top",
+        side: pad.side === "bottom" ? "B" : "F",
       });
       continue;
     }
@@ -64,7 +62,7 @@ export function componentBoxes(scene: PcbScene): ComponentBox3[] {
     group.x1 = Math.max(group.x1, pad.x + halfW);
     group.y1 = Math.max(group.y1, pad.y + halfH);
     group.count += 1;
-    group.maxPad = Math.max(group.maxPad, pad.width, pad.height);
+    if (pad.side === "bottom") group.side = "B";
   }
   const boxes: ComponentBox3[] = [];
   for (const [ref, group] of groups) {
@@ -74,7 +72,7 @@ export function componentBoxes(scene: PcbScene): ComponentBox3[] {
       y0: group.y0 - PAD_PAD_MM,
       x1: group.x1 + PAD_PAD_MM,
       y1: group.y1 + PAD_PAD_MM,
-      heightMm: estimateHeight(group.count, group.maxPad),
+      heightMm: estimateHeight(group.count),
       side: group.side,
       estimated: true,
     });

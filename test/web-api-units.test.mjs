@@ -646,6 +646,14 @@ test("GET /ecad/pcb：给工程就出板图，层开关与缺板提示都对（S
   assert.equal(got.body.pcbView.pads, 1);
   assert.equal(got.body.pcbView.tracks, 2);
   assert.match(got.body.pcbView.svg, /<svg/u);
+  // 3D：路由只给几何，客户端自己画（S209）。
+  assert.equal(got.body.pcbView.boxes.length, 1);
+  assert.equal(got.body.pcbView.boxes[0].ref, "R1");
+  // 这颗夹具只有一个焊盘：高度按「脚数 1」估成 1 mm。
+  assert.equal(got.body.pcbView.boxes[0].heightMm, 1);
+  assert.equal(got.body.pcbView.boxes[0].side, "F");
+  assert.equal(got.body.pcbView.boxes[0].estimated, true);
+  assert.deepEqual(got.body.pcbView.board3d, { x0: 0, y0: 0, x1: 20, y1: 10, thicknessMm: 1.6 });
 
   const hidden = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/pcb", query: { projectDir: root, bottom: "0", refs: "0" }, deps });
   assert.equal(hidden.body.pcbView.ok, true);
