@@ -405,6 +405,7 @@ export function registerPcbTools(ctx: DshContext): void {
         apply: { type: "boolean", description: "把布好的板子写回原文件（先备份 .bak）；默认 false 只写到 <板名>.auto.kicad_pcb。" },
         strategy: { type: "string", enum: ["krt", "own"], description: "krt = 引擎自带的整套 autoroute（默认）；own = 用我们自己的规则直接调 route.py（显式线宽/间距/电源网/45° 平滑）。" },
         nets: { type: "array", items: { type: "string" }, description: "strategy=own 时要布的网络；缺省交给引擎按全部网络处理（耗时长）。" },
+        ordering: { type: "string", enum: ["mps", "inside_out"], description: "strategy=own 的网络排序：mps（默认，先布大网）/ inside_out（由内向外）。" },
       },
       required: [],
     },
@@ -425,7 +426,7 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 1_900_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[] }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[]; ordering?: string }, exec: ToolExec) => {
       const empty = { ok: false, error: "", dryRun: args.dryRun !== false, boardFile: "", output: "", engine: "", seconds: 0, openNets: -1, steps: [] as { tag: string; what: string; why: string; optional: boolean }[], warnings: [] as string[], notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
@@ -509,7 +510,7 @@ export function registerPcbTools(ctx: DshContext): void {
             powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
             powerWidthMm: preset.powerWidthMm,
             layers: ["F.Cu", "B.Cu"],
-            ordering: "mps",
+            ordering: args.ordering === "inside_out" ? "inside_out" : "mps",
             viaSizeMm: spec.viaDiameterMm,
             viaDrillMm: spec.viaDrillMm,
             maxRipup: 5,
