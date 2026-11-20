@@ -5946,7 +5946,8 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - `route.py --track-width 0.30 --clearance 0.20 --layers F.Cu B.Cu --ordering mps --smoothing --max-ripup 2`：11.9 s、两个网都布通（`routed_single: [LCD_RST, BUZZ]`）、14 段、线宽 0.3 与 0.127（后者是焊盘处 neckdown）、`min_clearance_used 0.1818`。
 - 参数形态踩坑：`--nets`、`--layers`、`--power-nets`、`--power-nets-widths` 在 route.py 里都是 `nargs="+"`，必须传多个独立 token，拼成 `"A,B"` 会被当成一个不存在的网络名（第一次探针就因此报 `none of the requested net name(s) exist`）。
 
-**验证**：26 套件 / 292 pass / 0 fail；`pack-smoke` 通过；包体 611.4 KB / 173 文件（解包 2768.9 KB）。
+**面板入口（同批）**：`/ecad/action` 增 `route-own` 动作、面板「电路设计」加「自有规则布线」按钮（走同一套 preset，产出 `<板名>.own.kicad_pcb`，不直接覆盖原板；要写回用 `stm32_pcb_autoroute strategy=own apply=true`）。
+**验证**：26 套件 / 293 pass / 0 fail；`pack-smoke` 通过；包体 612.2 KB / 173 文件（解包 2772.6 KB）。
 
 ### 二百（S194）、布线后处理与书本规则：先修线形，再谈拆线重试
 

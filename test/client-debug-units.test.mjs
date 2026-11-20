@@ -253,6 +253,12 @@ test("电路设计页能看叠层：按工程取阻抗线宽，没有板子就�
   assert.ok(source.indexOf("function useStackup(") < source.indexOf("function EcadPanel("));
 });
 
+test("电路设计页能用自有规则布线（S195）", () => {
+  const text = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
+  assert.ok(text.includes("自有规则布线"));
+  assert.ok(text.includes('"route-own"'));
+});
+
 test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲染（S151）", () => {
   const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(source.includes("function usePcbView("));
