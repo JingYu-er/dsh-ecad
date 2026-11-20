@@ -21,7 +21,8 @@ import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.
 import { planRouting } from "../engine/ecad/pcb/router.js";
 import { buildTrackScript, parseTrackReport } from "../engine/ecad/pcb/tracks.js";
 import { optimizeRoutes } from "../engine/ecad/pcb/route-opt.js";
-import { copperLayersOf, planeAssignment, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "../engine/ecad/pcb/krt-own.js";
+import { fillZones } from "../engine/ecad/pcb/zone-fill.js";
+import { copperLayersOf, effectiveRouteSpec, planeAssignment, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "../engine/ecad/pcb/krt-own.js";
 import { routingPreset } from "../engine/ecad/pcb/fab-tier.js";
 import { readBoardBox, readBoardFacts } from "../engine/ecad/dfm.js";
 import { resolveProjectDir } from "./project-dir.js";
@@ -462,6 +463,9 @@ export function registerPcbTools(ctx: DshContext): void {
       };
       if (args.strategy === "own") {
         const preset = routingPreset(copperLayersOf(readFileSync(input, "utf8")));
+        // 板子自己的 NetClass 比预设更严时按板子走（S200）。
+        const spec = effectiveRouteSpec(input, preset);
+        notes.push(...spec.notes);
         const ownOut = board.replace(/\.kicad_pcb$/u, ".own.kicad_pcb");
         // 4/6 层先铺平面（GND → In1，电源 → In2），再在 F/B 上布信号（S198）。
         let routeInput = input;
@@ -475,12 +479,12 @@ export function registerPcbTools(ctx: DshContext): void {
             inputPcb: input,
             outputPcb: planeOut,
             options: {
-              trackWidthMm: preset.signalWidthMm,
-              clearanceMm: preset.signalClearanceMm,
+              trackWidthMm: spec.trackWidthMm,
+              clearanceMm: spec.clearanceMm,
               powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
               powerWidthMm: preset.powerWidthMm,
-              viaSizeMm: preset.viaDiameterMm,
-              viaDrillMm: preset.viaDrillMm,
+              viaSizeMm: spec.viaDiameterMm,
+              viaDrillMm: spec.viaDrillMm,
             },
             planeNets: assignment.nets.length > 0 ? assignment.nets : ["GND"],
             planeLayers: assignment.layers.length > 0 ? assignment.layers : ["In1.Cu"],
@@ -499,14 +503,14 @@ export function registerPcbTools(ctx: DshContext): void {
           inputPcb: routeInput,
           outputPcb: ownOut,
           options: {
-            trackWidthMm: preset.signalWidthMm,
-            clearanceMm: preset.signalClearanceMm,
+            trackWidthMm: spec.trackWidthMm,
+            clearanceMm: spec.clearanceMm,
             powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
             powerWidthMm: preset.powerWidthMm,
             layers: ["F.Cu", "B.Cu"],
             ordering: "mps",
-            viaSizeMm: preset.viaDiameterMm,
-            viaDrillMm: preset.viaDrillMm,
+            viaSizeMm: spec.viaDiameterMm,
+            viaDrillMm: spec.viaDrillMm,
             maxRipup: 5,
             boardEdgeClearanceMm: 0.3,
             neckdownMm: 0.8,
@@ -515,8 +519,18 @@ export function registerPcbTools(ctx: DshContext): void {
           signal: exec.signal,
         });
         restoreRules();
+        // 平面与铺铜在布线后必须重填：route.py 出来的板子里 filled_polygon 是旧的，
+        // KiCad 的 DRC 会按「未连接」算（实测 70 条 unconnected，重填后 0）。
+        if (own.ok) {
+          const refilled = await fillZones(ctx.subprocess, located.toolchain, own.output, exec.signal);
+          if (refilled.ok) {
+            notes.push("铺铜已重填：" + String(refilled.zones) + " 个区");
+          } else {
+            notes.push("铺铜重填没成功（DRC 可能报未连接）：" + refilled.error);
+          }
+        }
         const summary = own.summary as { routed_single?: string[]; failed_single?: string[]; open_single?: string[]; min_clearance_used?: number; total_vias?: number };
-        notes.push("自有规则：线宽 " + String(preset.signalWidthMm) + " mm、间距 " + String(preset.signalClearanceMm) + " mm、电源 " + String(preset.powerWidthMm) + " mm");
+        notes.push("自有规则：线宽 " + String(spec.trackWidthMm) + " mm、间距 " + String(spec.clearanceMm) + " mm、电源 " + String(preset.powerWidthMm) + " mm、过孔 " + String(spec.viaDiameterMm) + "/" + String(spec.viaDrillMm) + " mm");
         if (own.retried.length > 0) {
           notes.push("第一轮没布通 " + String(own.retried.length) + " 个网，已用更大的 rip-up 预算补第二轮：" + own.retried.join("、"));
         }

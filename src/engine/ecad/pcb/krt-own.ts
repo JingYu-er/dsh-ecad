@@ -6,10 +6,17 @@
  * 并打开它自带的 45° smoothing。这里只负责拼参数、跑、把汇总拿回来。
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { SubprocessService } from "../../../types.js";
 import { runCapture } from "../../subprocess-runner.js";
 import type { KrtRuntime } from "./krt.js";
+
+
+/** 引擎以自身目录为 cwd 运行，相对路径会落到引擎目录里；这里统一按输入板所在目录解析。 */
+function absFrom(inputPcb: string, target: string): string {
+  if (isAbsolute(target)) return target;
+  return resolve(inputPcb !== "" ? dirname(inputPcb) : process.cwd(), target);
+}
 
 const ROUTE_REL = join("py_router", "route.py");
 const PLANES_REL = join("py_router", "route_planes.py");
@@ -119,14 +126,16 @@ export function planeAssignment(pcbText: string, copperLayers: number): { nets: 
   }
   const nets: string[] = [];
   const layers: string[] = [];
-  const ground = [...padCounts.keys()].find((name) => /^(?:GND|VSS|AGND|PGND|DGND)$/iu.test(name));
+  // 网络名可能带图纸路径前缀（KiCad 写作 /ADS1256/AVDD_5V），取最后一段再判。
+  const leaf = (name: string): string => name.split("/").pop() ?? name;
+  const ground = [...padCounts.keys()].find((name) => /^(?:GND|VSS|AGND|PGND|DGND|GNDA|GNDD)$/iu.test(leaf(name)));
   if (ground !== undefined) {
     nets.push(ground);
     layers.push("In1.Cu");
   }
   if (copperLayers >= 4) {
     const power = [...padCounts.entries()]
-      .filter(([name]) => /^\+?(?:3V3|V3V3|VCC|VDD|5V|VBUS|VBAT|VIN)$/iu.test(name))
+      .filter(([name]) => /^\+?(?:3V3|V3V3|VCC|VDD|5V|VBUS|VBAT|VIN|AVDD|DVDD|AVCC|DVCC)(?:_?5V|_?3V3)?$/iu.test(leaf(name)))
       .sort((a, b) => b[1] - a[1])[0];
     if (power !== undefined) {
       nets.push(power[0]);
@@ -134,6 +143,66 @@ export function planeAssignment(pcbText: string, copperLayers: number): { nets: 
     }
   }
   return { nets, layers };
+}
+
+/**
+ * 我们的预设不能比板子自己的规则更松（S200）。
+ *
+ * 人工画的板子在 `.kicad_pro` 里写着自己的 NetClass：间距 0.198、过孔 0.6/0.3。
+ * 拿预设的 0.15 / 0.45/0.25 去布，DRC 会成片报 `clearance` 与 `via_diameter`——
+ * 那不是布得不好，是根本没按这块板的规则布。这里取两边较严的一侧。
+ */
+export interface EffectiveRouteSpec {
+  trackWidthMm: number;
+  clearanceMm: number;
+  viaDiameterMm: number;
+  viaDrillMm: number;
+  /** 板子自己声明的规则，用于报告；读不到就是 null。 */
+  boardRules: { clearanceMm: number | null; viaDiameterMm: number | null; viaDrillMm: number | null; trackWidthMm: number | null } | null;
+  notes: string[];
+}
+
+export function effectiveRouteSpec(boardFile: string, preset: { signalWidthMm: number; signalClearanceMm: number; viaDiameterMm: number; viaDrillMm: number }): EffectiveRouteSpec {
+  const notes: string[] = [];
+  let boardRules: EffectiveRouteSpec["boardRules"] = null;
+  const pro = boardFile.replace(/\.kicad_pcb$/u, ".kicad_pro");
+  if (existsSync(pro)) {
+    try {
+      const parsed = JSON.parse(readFileSync(pro, "utf8")) as {
+        net_settings?: { classes?: Array<{ name?: string; clearance?: number; via_diameter?: number; via_drill?: number; track_width?: number }> };
+      };
+      const fallback = (parsed.net_settings?.classes ?? []).find((item) => item.name === "Default") ?? (parsed.net_settings?.classes ?? [])[0];
+      if (fallback !== undefined) {
+        boardRules = {
+          clearanceMm: typeof fallback.clearance === "number" ? fallback.clearance : null,
+          viaDiameterMm: typeof fallback.via_diameter === "number" ? fallback.via_diameter : null,
+          viaDrillMm: typeof fallback.via_drill === "number" ? fallback.via_drill : null,
+          trackWidthMm: typeof fallback.track_width === "number" ? fallback.track_width : null,
+        };
+      }
+    } catch {
+      notes.push("读不懂板子的 .kicad_pro：按预设布线，DRC 可能报规则不符");
+    }
+  } else {
+    notes.push("板子旁边没有 .kicad_pro：按预设布线，DRC 可能报规则不符");
+  }
+  const pick = (presetValue: number, boardValue: number | null | undefined): number =>
+    boardValue !== null && boardValue !== undefined && Number.isFinite(boardValue) && boardValue > presetValue ? boardValue : presetValue;
+  const spec: EffectiveRouteSpec = {
+    trackWidthMm: pick(preset.signalWidthMm, boardRules?.trackWidthMm),
+    clearanceMm: pick(preset.signalClearanceMm, boardRules?.clearanceMm),
+    viaDiameterMm: pick(preset.viaDiameterMm, boardRules?.viaDiameterMm),
+    viaDrillMm: pick(preset.viaDrillMm, boardRules?.viaDrillMm),
+    boardRules,
+    notes,
+  };
+  if (boardRules !== null && spec.clearanceMm > preset.signalClearanceMm) {
+    notes.push("按板子自己的规则布：间距 " + spec.clearanceMm.toFixed(4) + " mm（预设 " + preset.signalClearanceMm.toFixed(3) + " mm 更松）");
+  }
+  if (boardRules !== null && spec.viaDiameterMm > preset.viaDiameterMm) {
+    notes.push("过孔取板子规则：" + spec.viaDiameterMm.toFixed(3) + "/" + spec.viaDrillMm.toFixed(3) + " mm");
+  }
+  return spec;
 }
 
 /** 平面铺铜（4/6 层）：GND 走内层整片，电源按需要再一层。参数用同一个 preset。 */
@@ -163,7 +232,7 @@ export interface PlaneReport {
 export function ownPlaneArgv(runtimeRoot: string, request: Omit<PlaneRequest, "subprocess" | "runtime" | "timeoutMs" | "signal">): string[] {
   const options = request.options;
   return [
-    join(runtimeRoot, PLANES_REL), request.inputPcb, "--output", request.outputPcb, "--overwrite",
+    join(runtimeRoot, PLANES_REL), absFrom(request.inputPcb, request.inputPcb), "--output", absFrom(request.inputPcb, request.outputPcb), "--overwrite",
     "--nets", ...request.planeNets,
     "--plane-layers", ...request.planeLayers,
     "--track-width", (options.powerWidthMm ?? options.trackWidthMm).toFixed(3),
@@ -171,6 +240,9 @@ export function ownPlaneArgv(runtimeRoot: string, request: Omit<PlaneRequest, "s
     "--via-size", (options.viaSizeMm ?? 0.45).toFixed(3),
     "--via-drill", (options.viaDrillMm ?? 0.25).toFixed(3),
     "--zone-clearance", options.clearanceMm.toFixed(3),
+    // 铺铜只铺铜皮，不负责把 SMD 焊盘接上去；不开 stitching 的话，
+    // GND 的 SMD 焊盘在 DRC 里全算「未连接」（实测 70 条）。
+    "--stitch-vias",
   ];
 }
 
@@ -187,7 +259,7 @@ export async function runOwnRulePlanes(request: PlaneRequest): Promise<PlaneRepo
     signal: request.signal,
   });
   const seconds = Math.max(0.1, Math.round((Date.now() - started) / 100) / 10);
-  const produced = existsSync(request.outputPcb);
+  const produced = existsSync(absFrom(request.inputPcb, request.outputPcb));
   const summaryLine = result.stdout.split(/\r?\n/u).reverse().find((line) => line.startsWith("JSON_SUMMARY:"));
   let zones: Array<{ layer: string; net: string }> = [];
   let padCoverage = "";
@@ -212,7 +284,8 @@ export async function runOwnRulePlanes(request: PlaneRequest): Promise<PlaneRepo
     : result.exitCode === 0 && produced
       ? ""
       : "平面铺铜没有产出板子：" + (tail === "" ? "引擎没有给出原因" : tail);
-  return { ok: error === "", error, output: produced ? request.outputPcb : "", seconds, zones, padCoverage, log: result.stdout.slice(-2000) };
+  const output = absFrom(request.inputPcb, request.outputPcb);
+  return { ok: error === "", error, output: produced ? output : "", seconds, zones, padCoverage, log: result.stdout.slice(-2000) };
 }
 
 /** 从汇总里取这一轮没布通的网络名（不重复、保持原顺序）。 */
@@ -281,7 +354,7 @@ export function widthHistogram(pcbText: string): Record<string, number> {
 /** 拼 route.py 参数。单独导出是为了能单测（不跑子进程也能断言参数）。 */
 export function ownRuleArgv(runtimeRoot: string, request: Omit<OwnRuleRequest, "subprocess" | "runtime" | "timeoutMs" | "signal">): string[] {
   const options = request.options;
-  const args = [join(runtimeRoot, ROUTE_REL), request.inputPcb, "--output", request.outputPcb];
+  const args = [join(runtimeRoot, ROUTE_REL), absFrom(request.inputPcb, request.inputPcb), "--output", absFrom(request.inputPcb, request.outputPcb)];
   args.push("--track-width", options.trackWidthMm.toFixed(3));
   args.push("--clearance", options.clearanceMm.toFixed(3));
   // 每个 net class 都按我们的间距上限走，别让某些 class 偷偷放宽
@@ -339,7 +412,7 @@ export async function runOwnRuleRoute(request: OwnRuleRequest): Promise<OwnRuleR
     }
   }
   const exitOk = result.exitCode === 0 && result.spawnError === null;
-  const produced = existsSync(request.outputPcb);
+  const produced = existsSync(absFrom(request.inputPcb, request.outputPcb));
   const tail = result.stderr.split(/\r?\n/u).filter((line) => line.trim() !== "").slice(-1)[0] ?? "";
   const error = result.timedOut
     ? "布线超时（" + String(Math.round(seconds)) + " 秒）"

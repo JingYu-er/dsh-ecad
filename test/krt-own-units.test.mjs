@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copperLayersOf, failedNetsOf, ownPlaneArgv, ownRuleArgv, planeAssignment, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, effectiveRouteSpec, failedNetsOf, ownPlaneArgv, ownRuleArgv, planeAssignment, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
 
 test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
   const argv = ownRuleArgv("C:/krt", {
@@ -88,4 +88,57 @@ test("内层分配：地固定 In1，电源取焊盘最多的那个，2 层只�
   assert.deepEqual(planeAssignment(board(["GND", "V3V3"]), 2), { nets: ["GND"], layers: ["In1.Cu"] });
   // 没有地网就一个平面都不铺，交给调用方回退
   assert.deepEqual(planeAssignment(board(["SDA", "SCL"]), 4), { nets: [], layers: [] });
+});
+
+test("内层分配认图纸路径前缀：/ADS1256/AVDD_5V 这种名字也算电源网（S200）", () => {
+  const board =
+    '(kicad_pcb ' +
+    ['(pad "1" smd rect (at 0 0) (size 0.3 0.4) (layers "F.Cu") (net "GND"))',
+     '(pad "2" smd rect (at 0 0) (size 0.3 0.4) (layers "F.Cu") (net "/ADS1256/AVDD_5V"))',
+     '(pad "3" smd rect (at 0 0) (size 0.3 0.4) (layers "F.Cu") (net "/ADS1256/AVDD_5V"))',
+     '(pad "4" smd rect (at 0 0) (size 0.3 0.4) (layers "F.Cu") (net "/ADS1256/GNDA"))'].join(" ") +
+    ")";
+  assert.deepEqual(planeAssignment(board, 4), { nets: ["GND", "/ADS1256/AVDD_5V"], layers: ["In1.Cu", "In2.Cu"] });
+});
+
+test("引擎以自身目录为 cwd：相对路径要按输入板所在目录解析（S200）", () => {
+  const argv = ownRuleArgv("C:/krt", {
+    inputPcb: "D:/proj/PCB1.kicad_pcb",
+    outputPcb: "PCB1-own.kicad_pcb",
+    options: { trackWidthMm: 0.2, clearanceMm: 0.15 },
+  });
+  assert.equal(argv[1], "D:/proj/PCB1.kicad_pcb");
+  assert.ok(argv[argv.indexOf("--output") + 1].replace(/\\/gu, "/").startsWith("D:/proj/"));
+});
+
+test("预设不能比板子自己的规则更松：间距/过孔取较严的一侧（S200）", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "dsh-ecad-spec-"));
+  try {
+    const board = join(dir, "PCB1.kicad_pcb");
+    writeFileSync(board, "(kicad_pcb)", "utf8");
+    writeFileSync(
+      join(dir, "PCB1.kicad_pro"),
+      JSON.stringify({ net_settings: { classes: [{ name: "Default", clearance: 0.19812, via_diameter: 0.6, via_drill: 0.3, track_width: 0.19812 }] } }),
+      "utf8",
+    );
+    const preset = { signalWidthMm: 0.2, signalClearanceMm: 0.15, viaDiameterMm: 0.45, viaDrillMm: 0.25 };
+    const spec = effectiveRouteSpec(board, preset);
+    assert.equal(spec.clearanceMm, 0.19812);
+    assert.equal(spec.viaDiameterMm, 0.6);
+    assert.equal(spec.viaDrillMm, 0.3);
+    assert.equal(spec.trackWidthMm, 0.2);
+    assert.ok(spec.notes.some((note) => note.includes("板子自己的规则")));
+
+    // 板子没写规则时按预设，并且要说明「读不到板子的规则」
+    const bare = join(dir, "bare.kicad_pcb");
+    writeFileSync(bare, "(kicad_pcb)", "utf8");
+    const loose = effectiveRouteSpec(bare, preset);
+    assert.equal(loose.clearanceMm, 0.15);
+    assert.ok(loose.notes.some((note) => note.includes("没有 .kicad_pro")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

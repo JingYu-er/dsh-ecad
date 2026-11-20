@@ -61,10 +61,11 @@ import { locateEcadToolchain } from "./ecad/toolchain.js";
 import { locatePoppler } from "./pdf/toolchain.js";
 import { popplerDirs } from "../tools/pdf.js";
 import { readPcbScene } from "./ecad/pcb/scene.js";
-import { copperLayersOf, planeAssignment, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "./ecad/pcb/krt-own.js";
+import { copperLayersOf, effectiveRouteSpec, planeAssignment, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "./ecad/pcb/krt-own.js";
 import { routingPreset } from "./ecad/pcb/fab-tier.js";
 import { connectPcbIpc } from "./ecad/pcb/ipc.js";
 import { renderPcbSvg } from "./ecad/pcb/pcb-svg.js";
+import { fillZones } from "./ecad/pcb/zone-fill.js";
 import { applyQuotes, readBom } from "./ecad/bom.js";
 import { analyzeStackup, DEFAULT_TARGETS } from "./ecad/pcb/stackup.js";
 import { analyzeEmc } from "./ecad/pcb/emc.js";
@@ -1720,6 +1721,7 @@ export async function handleWebApi(input: {
       const board = latest.ok ? latest.pcbFile : "";
       if (board === "" || !existsSync(board)) return fail(409, "还没有可用的 .kicad_pcb：先构建一次");
       const preset = routingPreset(copperLayersOf(readFileSync(board, "utf8")));
+      const spec = effectiveRouteSpec(board, preset);
       const nets = Array.isArray(parsed.value.nets) ? parsed.value.nets.filter((item): item is string => typeof item === "string") : [];
       let routeInput = board;
       const planeNotes: string[] = [];
@@ -1732,12 +1734,12 @@ export async function handleWebApi(input: {
           inputPcb: board,
           outputPcb: board.replace(/\.kicad_pcb$/u, ".own-plane.kicad_pcb"),
           options: {
-            trackWidthMm: preset.signalWidthMm,
-            clearanceMm: preset.signalClearanceMm,
+            trackWidthMm: spec.trackWidthMm,
+            clearanceMm: spec.clearanceMm,
             powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
             powerWidthMm: preset.powerWidthMm,
-            viaSizeMm: preset.viaDiameterMm,
-            viaDrillMm: preset.viaDrillMm,
+            viaSizeMm: spec.viaDiameterMm,
+            viaDrillMm: spec.viaDrillMm,
           },
           planeNets: assignment.nets.length > 0 ? assignment.nets : ["GND"],
           planeLayers: assignment.layers.length > 0 ? assignment.layers : ["In1.Cu"],
@@ -1745,7 +1747,8 @@ export async function handleWebApi(input: {
         });
         if (planes.ok) {
           routeInput = planes.output;
-          planeNotes.push("平面：" + planes.zones.map((zone) => zone.net + "→" + zone.layer).join("、"));
+          planeNotes.push(...spec.notes);
+        planeNotes.push("平面：" + planes.zones.map((zone) => zone.net + "→" + zone.layer).join("、"));
         } else {
           planeNotes.push("平面没铺成，退回全外层布线：" + planes.error);
         }
@@ -1756,14 +1759,14 @@ export async function handleWebApi(input: {
         inputPcb: routeInput,
         outputPcb: board.replace(/\.kicad_pcb$/u, ".own.kicad_pcb"),
         options: {
-          trackWidthMm: preset.signalWidthMm,
-          clearanceMm: preset.signalClearanceMm,
+          trackWidthMm: spec.trackWidthMm,
+          clearanceMm: spec.clearanceMm,
           powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
           powerWidthMm: preset.powerWidthMm,
           layers: ["F.Cu", "B.Cu"],
           ordering: "mps",
-          viaSizeMm: preset.viaDiameterMm,
-          viaDrillMm: preset.viaDrillMm,
+          viaSizeMm: spec.viaDiameterMm,
+          viaDrillMm: spec.viaDrillMm,
           maxRipup: 5,
           boardEdgeClearanceMm: 0.3,
           neckdownMm: 0.8,
@@ -1771,6 +1774,12 @@ export async function handleWebApi(input: {
         },
         signal: input.deps.signal,
       });
+      // 布线会改铜皮，平面必须重填，否则 KiCad 把平面的焊盘全算「未连接」（S200）。
+      let refillNote = "";
+      if (own.ok) {
+        const refilled = await fillZones(input.deps.subprocess, located.toolchain, own.output, input.deps.signal);
+        refillNote = refilled.ok ? "铺铜已重填：" + String(refilled.zones) + " 个区" : "铺铜重填没成功（DRC 可能报未连接）：" + refilled.error;
+      }
       const summary = own.summary as { routed_single?: string[]; failed_single?: string[]; min_clearance_used?: number; total_vias?: number };
       return ok({
         ecadAction: {
@@ -1783,6 +1792,7 @@ export async function handleWebApi(input: {
           ],
           notes: [
             ...planeNotes,
+            refillNote,
             "布通 " + String((summary.routed_single ?? []).length) + " 个网络，未布通 " + String((summary.failed_single ?? []).length) + " 个",
             own.ok ? "输出：" + own.output : "未产出板子",
             typeof summary.min_clearance_used === "number" && summary.min_clearance_used < preset.signalClearanceMm
