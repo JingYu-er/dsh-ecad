@@ -12,6 +12,7 @@ import { runCapture } from "../../subprocess-runner.js";
 import type { KrtRuntime } from "./krt.js";
 
 const ROUTE_REL = join("py_router", "route.py");
+const PLANES_REL = join("py_router", "route_planes.py");
 
 export interface OwnRuleOptions {
   /** 信号线宽（mm）。 */
@@ -92,6 +93,85 @@ export interface OwnRuleReport {
   thinRatio: number;
   segments: number;
   log: string;
+}
+
+/** 平面铺铜（4/6 层）：GND 走内层整片，电源按需要再一层。参数用同一个 preset。 */
+export interface PlaneRequest {
+  readonly subprocess: SubprocessService;
+  readonly runtime: KrtRuntime;
+  readonly inputPcb: string;
+  readonly outputPcb: string;
+  readonly options: OwnRuleOptions;
+  readonly planeNets: readonly string[];
+  readonly planeLayers: readonly string[];
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface PlaneReport {
+  ok: boolean;
+  error: string;
+  output: string;
+  seconds: number;
+  zones: Array<{ layer: string; net: string }>;
+  padCoverage: string;
+  log: string;
+}
+
+/** 拼 route_planes.py 参数。 */
+export function ownPlaneArgv(runtimeRoot: string, request: Omit<PlaneRequest, "subprocess" | "runtime" | "timeoutMs" | "signal">): string[] {
+  const options = request.options;
+  return [
+    join(runtimeRoot, PLANES_REL), request.inputPcb, "--output", request.outputPcb, "--overwrite",
+    "--nets", ...request.planeNets,
+    "--plane-layers", ...request.planeLayers,
+    "--track-width", (options.powerWidthMm ?? options.trackWidthMm).toFixed(3),
+    "--clearance", options.clearanceMm.toFixed(3),
+    "--via-size", (options.viaSizeMm ?? 0.45).toFixed(3),
+    "--via-drill", (options.viaDrillMm ?? 0.25).toFixed(3),
+    "--zone-clearance", options.clearanceMm.toFixed(3),
+  ];
+}
+
+/** 跑平面铺铜，取回 zones 与几何核对结果。 */
+export async function runOwnRulePlanes(request: PlaneRequest): Promise<PlaneReport> {
+  const argv = ownPlaneArgv(request.runtime.root, request);
+  const started = Date.now();
+  const result = await runCapture(request.subprocess, {
+    argv: [request.runtime.python, ...argv],
+    cwd: request.runtime.root,
+    env: { PYTHONPATH: [request.runtime.root, process.env["PYTHONPATH"] ?? ""].filter((item) => item !== "").join(";") },
+    timeoutMs: request.timeoutMs ?? 900_000,
+    maxBytes: 4 * 1024 * 1024,
+    signal: request.signal,
+  });
+  const seconds = Math.max(0.1, Math.round((Date.now() - started) / 100) / 10);
+  const produced = existsSync(request.outputPcb);
+  const summaryLine = result.stdout.split(/\r?\n/u).reverse().find((line) => line.startsWith("JSON_SUMMARY:"));
+  let zones: Array<{ layer: string; net: string }> = [];
+  let padCoverage = "";
+  if (summaryLine !== undefined) {
+    try {
+      const parsed = JSON.parse(summaryLine.slice("JSON_SUMMARY:".length)) as { plane_zones?: unknown; pads?: unknown; pads_scope?: string };
+      if (Array.isArray(parsed.plane_zones)) {
+        zones = parsed.plane_zones.map((item) => {
+          const zone = item as { layer?: unknown; net?: unknown };
+          return { layer: String(zone.layer ?? ""), net: String(zone.net ?? "") };
+        });
+      }
+      const pads = parsed.pads as { geometric_failed?: unknown } | undefined;
+      if (pads !== undefined && typeof pads.geometric_failed === "number") padCoverage = parsed.pads_scope ?? "";
+    } catch {
+      zones = [];
+    }
+  }
+  const tail = result.stderr.split(/\r?\n/u).filter((line) => line.trim() !== "").slice(-1)[0] ?? "";
+  const error = result.timedOut
+    ? "平面铺铜超时（" + String(Math.round(seconds)) + " 秒）"
+    : result.exitCode === 0 && produced
+      ? ""
+      : "平面铺铜没有产出板子：" + (tail === "" ? "引擎没有给出原因" : tail);
+  return { ok: error === "", error, output: produced ? request.outputPcb : "", seconds, zones, padCoverage, log: result.stdout.slice(-2000) };
 }
 
 /** 从汇总里取这一轮没布通的网络名（不重复、保持原顺序）。 */

@@ -44,6 +44,22 @@ S194/S195 让线不再乱、也不再贴着工艺下限，但 2 层预设的间�
 
 **验证**：`test/krt-own-units.test.mjs` 增 `failedNetsOf` 去重用例；26 套件 / **295 pass / 0 fail**。
 
+### 二百零四、4/6 层先铺平面，再布线：过孔和换层的源头在电源（S198）
+
+2 层板的「线乱」一半来自过孔——每个去耦电容都要连 GND 和电源，没有平面就只能一层一层穿。4/6 层的正解是先把内层做成平面：
+
+- `route_planes.py --nets GND --plane-layers In1.Cu` 铺 GND 整片（`--overwrite`、间距与过孔沿用 `routingPreset`）；
+- 电源网留给 In2（本轮只接了 GND，In2 的电源平面还没接）；
+- 平面铺完再在 F/B 上布信号（`route.py --layers F.Cu B.Cu`）。
+
+工具里 `strategy=own` 现在按层数自动分两段：`preset.layers >= 4` 先 `runOwnRulePlanes()`，成功就用平面后的板子做输入，失败退回全外层并在 notes 说明。
+
+**实测（合成的 4 层板：把 handheld 的层表改成 F/In1/In2/B）**：平面 **2.4 s**、`plane_zones: [{layer: In1.Cu, net: GND}]`、`47/47` 个 GND 焊盘连到平面、`plane_resistance` 给出 0.001088 Ω / 21 A；随后 F/B 布线 **6.8 s**、`BUZZ` 与 `LCD_RST` 两个网布通、线宽 **0.20 mm**（4 层档）。
+
+**如实说明**：这块 4 层板是合成的，真实 4 层工程还没验；In2 电源平面、差分对内层、BGA 扇出仍未接。
+
+**验证**：`test/krt-own-units.test.mjs` 增 `ownPlaneArgv` 断言（`--nets GND`、`--plane-layers In1.Cu`、`--track-width 0.450`）；26 套件 / **296 pass / 0 fail**。
+
 ### 一百九十四、设置页只读列出五处外部依赖（S187）
 
 拆分后设置页还挂着从固件侧抄来的「STM32 工具链」：装 msys2、装 CubeMX 固件包、探测 ARM 工具链——这些在硬件插件里一项都用不上，而且它调用的 `/install/*` 路由已经被裁掉，点下去只有 404。
@@ -5974,7 +5990,7 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S197）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S198）
 
 ### 二百零一（S195）、自有规则布线：不再让引擎按工艺下限自作主张
 

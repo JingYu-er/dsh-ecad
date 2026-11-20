@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copperLayersOf, failedNetsOf, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, failedNetsOf, ownPlaneArgv, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
 
 test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
   const argv = ownRuleArgv("C:/krt", {
@@ -63,4 +63,18 @@ test("自有规则布线：第一轮没布通的网点出来去重，第二轮�
   const failed = failedNetsOf({ failed_single: ["A", "B"], open_single: ["B", "C"], failed: undefined });
   assert.deepEqual(failed, ["A", "B", "C"]);
   assert.deepEqual(failedNetsOf({}), []);
+});
+
+test("4/6 层先铺平面：GND 走内层，参数用同一套 preset（S198）", () => {
+  const argv = ownPlaneArgv("C:/krt", {
+    inputPcb: "a.kicad_pcb",
+    outputPcb: "b.kicad_pcb",
+    planeNets: ["GND"],
+    planeLayers: ["In1.Cu"],
+    options: { trackWidthMm: 0.2, clearanceMm: 0.15, powerNets: ["GND"], powerWidthMm: 0.45, viaSizeMm: 0.45, viaDrillMm: 0.25 },
+  });
+  assert.match(argv[0], /route_planes\.py$/u);
+  assert.deepEqual(argv.slice(argv.indexOf("--nets"), argv.indexOf("--nets") + 2), ["--nets", "GND"]);
+  assert.deepEqual(argv.slice(argv.indexOf("--plane-layers"), argv.indexOf("--plane-layers") + 2), ["--plane-layers", "In1.Cu"]);
+  assert.equal(argv[argv.indexOf("--track-width") + 1], "0.450");
 });

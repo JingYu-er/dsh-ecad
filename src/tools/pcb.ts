@@ -21,7 +21,7 @@ import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.
 import { planRouting } from "../engine/ecad/pcb/router.js";
 import { buildTrackScript, parseTrackReport } from "../engine/ecad/pcb/tracks.js";
 import { optimizeRoutes } from "../engine/ecad/pcb/route-opt.js";
-import { copperLayersOf, runOwnRuleRouteWithRetry } from "../engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "../engine/ecad/pcb/krt-own.js";
 import { routingPreset } from "../engine/ecad/pcb/fab-tier.js";
 import { readBoardBox, readBoardFacts } from "../engine/ecad/dfm.js";
 import { resolveProjectDir } from "./project-dir.js";
@@ -463,10 +463,38 @@ export function registerPcbTools(ctx: DshContext): void {
       if (args.strategy === "own") {
         const preset = routingPreset(copperLayersOf(readFileSync(input, "utf8")));
         const ownOut = board.replace(/\.kicad_pcb$/u, ".own.kicad_pcb");
+        // 4/6 层先铺平面（GND → In1，电源 → In2），再在 F/B 上布信号（S198）。
+        let routeInput = input;
+        if (preset.layers >= 4) {
+          const planeOut = board.replace(/\.kicad_pcb$/u, ".own-plane.kicad_pcb");
+          const planes = await runOwnRulePlanes({
+            subprocess: ctx.subprocess,
+            runtime: { root, python: located.toolchain.python },
+            inputPcb: input,
+            outputPcb: planeOut,
+            options: {
+              trackWidthMm: preset.signalWidthMm,
+              clearanceMm: preset.signalClearanceMm,
+              powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
+              powerWidthMm: preset.powerWidthMm,
+              viaSizeMm: preset.viaDiameterMm,
+              viaDrillMm: preset.viaDrillMm,
+            },
+            planeNets: ["GND"],
+            planeLayers: ["In1.Cu"],
+            signal: exec.signal,
+          });
+          if (planes.ok) {
+            routeInput = planes.output;
+            notes.push("平面：" + planes.zones.map((zone) => zone.net + "→" + zone.layer).join("、") + "（" + String(planes.seconds) + " s）");
+          } else {
+            notes.push("平面没铺成，退回全外层布线：" + planes.error);
+          }
+        }
         const own = await runOwnRuleRouteWithRetry({
           subprocess: ctx.subprocess,
           runtime: { root, python: located.toolchain.python },
-          inputPcb: input,
+          inputPcb: routeInput,
           outputPcb: ownOut,
           options: {
             trackWidthMm: preset.signalWidthMm,
