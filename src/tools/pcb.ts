@@ -30,7 +30,7 @@ import { routingPreset } from "../engine/ecad/pcb/fab-tier.js";
 import { readBoardBox, readBoardFacts } from "../engine/ecad/dfm.js";
 import { resolveProjectDir } from "./project-dir.js";
 import { resolveProjectLayout } from "../engine/project-layout.js";
-import { krtRoot, krtStatus, krtVersion, quoteLayerNames, runKrtAutoroute, runKrtConnectedCheck } from "../engine/ecad/pcb/krt.js";
+import { assignNetIds, krtRoot, krtStatus, krtVersion, quoteLayerNames, runKrtAutoroute, runKrtConnectedCheck } from "../engine/ecad/pcb/krt.js";
 import { readPcbScene } from "../engine/ecad/pcb/scene.js";
 import { readMech, writeMechDxf } from "../engine/ecad/pcb/mech.js";
 import { renderPcbSvg } from "../engine/ecad/pcb/pcb-svg.js";
@@ -515,9 +515,12 @@ export function registerPcbTools(ctx: DshContext): void {
       let input = board;
       if (args.normalize !== false) {
         const normalized = quoteLayerNames(readFileSync(board, "utf8"));
+        // tscircuit 的板子只有焊盘内联网络、没有顶层网络表，布线器会当成「0 个网络」（S208）。
+        const nets = assignNetIds(normalized.text);
         input = board.replace(/\.kicad_pcb$/u, ".norm.kicad_pcb");
-        writeFileSync(input, normalized.text);
+        writeFileSync(input, nets.text);
         if (normalized.quoted > 0) notes.push("层名补引号：" + String(normalized.quoted) + " 处（引擎只认带引号的写法）");
+        if (nets.nets > 0 && nets.text !== normalized.text) notes.push("补网络表：" + String(nets.nets) + " 个网络（板子里只有焊盘内联网络，没有顶层声明）");
       }
       const outFile = board.replace(/\.kicad_pcb$/u, ".auto.kicad_pcb");
       // 布线器会把设置写回 .kicad_pro，布线后再抬一次，后续 DRC 才按工艺下限判。

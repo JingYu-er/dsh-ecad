@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { readSchematic } from "../../schematic/model.js";
 import { planDecaps, type DecapCap, type DecapPin } from "./decap-plan.js";
@@ -241,17 +241,37 @@ function isDecap(part: LayoutPart): boolean {
 
 export function defaultSchematicFile(boardFile: string): string {
   const dir = dirname(boardFile);
-  const candidates = [join(dir, "schematic.kicad_sch")];
-  try {
-    for (const entry of readdirSync(dir)) {
-      if (entry.endsWith(".kicad_sch")) candidates.push(join(dir, entry));
+  const stem = basename(boardFile).replace(/\.kicad_pcb$/u, "");
+  const candidates: string[] = [
+    join(dir, stem + ".kicad_sch"),
+    join(dir, "schematic.kicad_sch"),
+    // 手绘层：<工程>/hardware/schematic/，板子在 <工程>/hardware/kicad/。
+    join(dir, "..", "schematic", stem + ".kicad_sch"),
+    join(dir, "..", "schematic", "schematic.kicad_sch"),
+    // tscircuit 产物：<工程>/hardware/circuit/dist/<入口>/kicad/
+    join(dir, "..", "circuit", "dist", "index", "kicad", stem + ".kicad_sch"),
+    join(dir, "..", "circuit", "dist", "index", "kicad", "index.kicad_sch"),
+  ];
+  for (const root of [dir, join(dir, "..", "schematic"), join(dir, "..", "circuit", "dist", "index", "kicad")]) {
+    try {
+      for (const entry of readdirSync(root)) {
+        if (entry.endsWith(".kicad_sch")) candidates.push(join(root, entry));
+      }
+    } catch {
+      // 目录不存在就跳过
     }
-  } catch {
-    // 读不到目录就只用候选
   }
-  // 手绘层在 <工程>/hardware/schematic/，板子在 <工程>/hardware/kicad/。
-  candidates.push(join(dir, "..", "schematic", "schematic.kicad_sch"));
-  return candidates.find((file) => existsSync(file)) ?? "";
+  const existing = [...new Set(candidates)].filter((file) => existsSync(file));
+  if (existing.length === 0) return "";
+  // 多张图纸时优先能判电源脚的那张：没有 power_in 的图（tscircuit 生成的）判不出哪根是电源输入脚。
+  for (const file of existing) {
+    try {
+      if (/\(pin\s+power_in\b/u.test(readFileSync(file, "utf8"))) return file;
+    } catch {
+      // 读不到就当没有
+    }
+  }
+  return existing[0]!;
 }
 
 /** 从原理图取电源输入脚，再按位号 + 脚号映射到 PCB 焊盘坐标。 */

@@ -96,6 +96,95 @@ export function quoteLayerNames(text: string): { text: string; quoted: number } 
   return { text: out, quoted };
 }
 
+/**
+ * 给焊盘上的字符串网络补 KiCad 的网络表。
+ *
+ * tscircuit 导出的板子只有 `(net "GND")` 这种内联写法，没有顶层的 `(net <id> "GND")` 声明；
+ * KiCadRoutingTools 按「网络表 + 焊盘网络号」建网，读不到声明就当没有网络，于是整块板
+ * 「0 个网络要布」，跑完 20 秒什么都不改（S208）。
+ */
+export function assignNetIds(text: string): { text: string; nets: number } {
+  const names = new Map<string, number>();
+  let next = 1;
+  // 已有数字编号的（KiCad 自己保存过的板子）先登记，避免重复发号。
+  for (const match of text.matchAll(/\(net (\d+)(?: "([^"]*)")?\)/gu)) {
+    const id = Number(match[1]);
+    if (id >= next) next = id + 1;
+    if (match[2] !== undefined && match[2] !== "") names.set(match[2], id);
+  }
+  for (const match of text.matchAll(/\(net "([^"]*)"\)/gu)) {
+    const name = match[1] ?? "";
+    if (name === "" || names.has(name)) continue;
+    names.set(name, next);
+    next += 1;
+  }
+  if (names.size === 0) return { text, nets: 0 };
+  // 网络引用分两种写法，KiCad 10 认得很死：焊盘（pad）里必须带名字
+  // `(net <id> "NAME")`，走线/过孔只接受编号 `(net <id>)`。写成另一种都会让
+  // KiCad 报「应为 net name / 应为 ')'」而打不开板子（S208 两版都栽在这）。
+  let rewritten = "";
+  let depth = 0;
+  let padDepth = -1;
+  let at = 0;
+  const inline = /\(net "([^"]*)"\)|\(|\)/gu;
+  for (let match = inline.exec(text); match !== null; match = inline.exec(text)) {
+    rewritten += text.slice(at, match.index);
+    at = match.index + match[0].length;
+    const netName = match[1];
+    if (netName !== undefined) {
+      const id = names.get(netName);
+      const inPad = padDepth >= 0 && depth >= padDepth;
+      rewritten += id === undefined
+        ? '(net "' + netName + '")'
+        : inPad ? "(net " + String(id) + ' "' + netName + '")' : "(net " + String(id) + ")";
+      continue;
+    }
+    if (match[0] === "(") {
+      depth += 1;
+      if (/^\(pad\b/u.test(text.slice(match.index, match.index + 5))) padDepth = depth;
+      rewritten += "(";
+      continue;
+    }
+    // 收括号：退到 pad 块之外就不再算「在焊盘里」。
+    if (padDepth >= 0 && depth < padDepth) padDepth = -1;
+    depth -= 1;
+    rewritten += ")";
+  }
+  rewritten += text.slice(at);
+  // 只有焊盘里出现过、顶层没有声明的网络才补声明。
+  // 顶层声明只认**一级缩进**那些行：焊盘里的网络缩进更深，不能当成已声明。
+  const declared = new Set([...rewritten.matchAll(/^\t\(net \d+(?: "([^"]*)")?\)\s*$/gmu)].map((match) => match[1] ?? ""));
+  const missing = [...names].filter(([name]) => name !== "" && !declared.has(name));
+  if (missing.length === 0) return { text: rewritten, nets: names.size };
+  const block = missing.map(([name, id]) => '\t(net ' + String(id) + ' "' + name + '")').join("\n");
+  // 网络表要放在顶层子节点里：优先紧跟 (layers …) 之后，没有就插在 (kicad_pcb 之后。
+  const layersAt = rewritten.indexOf("(layers");
+  let insertAt = -1;
+  if (layersAt >= 0) {
+    let depth = 0;
+    for (let i = layersAt; i < rewritten.length; i += 1) {
+      const ch = rewritten[i];
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          // 插到这一行之后（跳过 \r\n），否则会粘在 `(layers …)` 的右括号后面。
+          let at = i + 1;
+          while (at < rewritten.length && (rewritten[at] === "\r" || rewritten[at] === "\n")) at += 1;
+          insertAt = at;
+          break;
+        }
+      }
+    }
+  }
+  if (insertAt < 0) {
+    const head = rewritten.indexOf("(kicad_pcb");
+    insertAt = head < 0 ? 0 : head + "(kicad_pcb".length + 1;
+  }
+  rewritten = rewritten.slice(0, insertAt) + block + "\n" + rewritten.slice(insertAt);
+  return { text: rewritten, nets: names.size };
+}
+
 interface RawStep {
   tag?: string;
   tool?: string;

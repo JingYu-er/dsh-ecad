@@ -15,7 +15,8 @@ import { buildSymbol } from "../lib/engine/ecad/gen/symbol.js";
 import { applySchEdits, pinPoint, replaySchEditsTo } from "../lib/engine/schematic/edit.js";
 import { parseSchText } from "../lib/engine/schematic/kicad-sch.js";
 import { analyzeLinks } from "../lib/engine/ecad/pcb/links.js";
-import { analyzeLayout } from "../lib/engine/ecad/pcb/layout-check.js";
+import { analyzeLayout, defaultSchematicFile } from "../lib/engine/ecad/pcb/layout-check.js";
+import { assignNetIds } from "../lib/engine/ecad/pcb/krt.js";
 import { readGerberSet } from "../lib/engine/ecad/pcb/gerber.js";
 import { absorbFromKicad, diffImport, readImportState, renderCircuitSource } from "../lib/engine/ecad/import.js";
 import { fetchEasyedaPackage, easyedaToKicadMod, parseEasyedaPackage } from "../lib/engine/ecad/easyeda.js";
@@ -1240,6 +1241,36 @@ test("库表：重复写也只保留一个表头，已有条目与新增条目�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("网络表：只有焊盘内联网络时补顶层声明，编号不重复也不动已有编号（S208）", () => {
+  const bare = [
+    "(kicad_pcb (version 20240108)",
+    "  (general (thickness 1.6))",
+    "  (layers",
+    "    (0 \"F.Cu\" signal)",
+    "    (31 \"B.Cu\" signal)",
+    "  )",
+    "  (footprint \"X\" (layer \"F.Cu\")",
+    "    (fp_text reference \"R1\" (at 0 0))",
+    "    (pad \"1\" smd rect (at 0 0) (net \"GND\"))",
+    "    (pad \"2\" smd rect (at 2 0) (net \"V3V3\"))",
+    "  )",
+    "  (segment (start 0 0) (end 1 0) (width 0.2) (layer \"F.Cu\") (net 7))",
+    ")",
+  ].join("\n");
+  const first = assignNetIds(bare);
+  assert.equal(first.nets, 2, JSON.stringify(first));
+  assert.match(first.text, /^\t\(net \d+ "GND"\)$/mu);
+  assert.match(first.text, /^\t\(net \d+ "V3V3"\)$/mu);
+  // 焊盘里带名字、走线里只有编号：写成另一种 KiCad 就打不开板子。
+  assert.ok(first.text.includes('(pad "1" smd rect (at 0 0) (net 8 "GND"))'), first.text);
+  assert.ok(first.text.includes('(pad "2" smd rect (at 2 0) (net 9 "V3V3"))'), first.text);
+  // 已有编号的走线不动，补的编号从 8 开始。
+  assert.match(first.text, /\(net 7\)/u);
+  assert.match(first.text, /\(net 8 "GND"\)|"GND"\)\s*\n\t\(net 9/u);
+  const second = assignNetIds(first.text);
+  assert.equal(second.text, first.text, "再跑一次不该有变化");
 });
 
 test("板图：解析 .kicad_pcb 出焊盘/走线/过孔/板框与内层说明（S151）", () => {
@@ -2894,6 +2925,16 @@ test("布局体检：数字网络名也能认出电源/地，去耦离得远按�
   const realReport = analyzeLayout(readFileSync(realBoardFile, "utf8"), realBoardFile);
   assert.ok(realReport.decap.pins >= 3, "自动认出原理图的电源输入脚：" + JSON.stringify(realReport.decap));
   assert.equal(realReport.notes.some((note) => note.includes("没有读到原理图")), false);
+
+  // 手绘层与 tscircuit 图纸同时在时，挑能判电源脚的那张（S207）。
+  const mixed = mkdtempSync(join(tmpdir(), "ecad-sch-pick-"));
+  mkdirSync(join(mixed, "kicad"), { recursive: true });
+  mkdirSync(join(mixed, "schematic"), { recursive: true });
+  writeFileSync(join(mixed, "kicad", "board.kicad_pcb"), readFileSync(realBoardFile, "utf8"));
+  writeFileSync(join(mixed, "kicad", "board.kicad_sch"), "(kicad_sch (symbol (pin passive line)))");
+  writeFileSync(join(mixed, "schematic", "schematic.kicad_sch"), "(kicad_sch (symbol (pin power_in line)))");
+  const picked = defaultSchematicFile(join(mixed, "kicad", "board.kicad_pcb"));
+  assert.match(picked.replace(/\\/gu, "/"), /schematic\/schematic\.kicad_sch$/u, "应优先挑有 power_in 的手绘层：" + picked);
   assert.match(far.message, /DVDD_3\.3V/u);
   const missing = analyzeLayout("(kicad_pcb (version 20241229) (layers \"F.Cu\"))", "board.kicad_pcb");
   assert.equal(missing.ok, false);
