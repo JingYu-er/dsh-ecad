@@ -58,6 +58,8 @@ S194/S195 让线不再乱、也不再贴着工艺下限，但 2 层预设的间�
 
 **如实说明**：这块 4 层板是合成的，真实 4 层工程还没验；In2 电源平面、差分对内层、BGA 扇出仍未接。
 
+**顺手修的真 bug**：面板连点两次「自有规则布线」，输出会变成 `index.own.own.kicad_pcb`——`findLatestKicadBuild` 把上一次的 `.own.kicad_pcb` 当成了最新构建产物。`isRouterWorkingPath` 补上 `.own.kicad_pcb` 与 `.own-plane.kicad_pcb` 两个前缀，派生板子不再参与「最新构建」的挑选，`test/ecad-units.test.mjs` 的用例也把这两份文件造进去一起断言。
+
 **验证**：`test/krt-own-units.test.mjs` 增 `ownPlaneArgv` 断言（`--nets GND`、`--plane-layers In1.Cu`、`--track-width 0.450`）；26 套件 / **296 pass / 0 fail**。
 
 ### 一百九十四、设置页只读列出五处外部依赖（S187）

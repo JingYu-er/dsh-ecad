@@ -61,7 +61,7 @@ import { locateEcadToolchain } from "./ecad/toolchain.js";
 import { locatePoppler } from "./pdf/toolchain.js";
 import { popplerDirs } from "../tools/pdf.js";
 import { readPcbScene } from "./ecad/pcb/scene.js";
-import { copperLayersOf, runOwnRuleRouteWithRetry } from "./ecad/pcb/krt-own.js";
+import { copperLayersOf, runOwnRulePlanes, runOwnRuleRouteWithRetry } from "./ecad/pcb/krt-own.js";
 import { routingPreset } from "./ecad/pcb/fab-tier.js";
 import { connectPcbIpc } from "./ecad/pcb/ipc.js";
 import { renderPcbSvg } from "./ecad/pcb/pcb-svg.js";
@@ -1721,10 +1721,37 @@ export async function handleWebApi(input: {
       if (board === "" || !existsSync(board)) return fail(409, "还没有可用的 .kicad_pcb：先构建一次");
       const preset = routingPreset(copperLayersOf(readFileSync(board, "utf8")));
       const nets = Array.isArray(parsed.value.nets) ? parsed.value.nets.filter((item): item is string => typeof item === "string") : [];
+      let routeInput = board;
+      const planeNotes: string[] = [];
+      if (preset.layers >= 4) {
+        const planes = await runOwnRulePlanes({
+          subprocess: input.deps.subprocess,
+          runtime: { root: routeRoot, python: located.toolchain.python },
+          inputPcb: board,
+          outputPcb: board.replace(/\.kicad_pcb$/u, ".own-plane.kicad_pcb"),
+          options: {
+            trackWidthMm: preset.signalWidthMm,
+            clearanceMm: preset.signalClearanceMm,
+            powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
+            powerWidthMm: preset.powerWidthMm,
+            viaSizeMm: preset.viaDiameterMm,
+            viaDrillMm: preset.viaDrillMm,
+          },
+          planeNets: ["GND"],
+          planeLayers: ["In1.Cu"],
+          signal: input.deps.signal,
+        });
+        if (planes.ok) {
+          routeInput = planes.output;
+          planeNotes.push("平面：" + planes.zones.map((zone) => zone.net + "→" + zone.layer).join("、"));
+        } else {
+          planeNotes.push("平面没铺成，退回全外层布线：" + planes.error);
+        }
+      }
       const own = await runOwnRuleRouteWithRetry({
         subprocess: input.deps.subprocess,
         runtime: { root: routeRoot, python: located.toolchain.python },
-        inputPcb: board,
+        inputPcb: routeInput,
         outputPcb: board.replace(/\.kicad_pcb$/u, ".own.kicad_pcb"),
         options: {
           trackWidthMm: preset.signalWidthMm,
@@ -1753,6 +1780,7 @@ export async function handleWebApi(input: {
             { tag: "route.py", what: "自有规则布线：" + String(preset.signalWidthMm) + " mm 线宽 / " + String(preset.signalClearanceMm) + " mm 间距", why: own.ok ? "完成" : own.error, optional: false },
           ],
           notes: [
+            ...planeNotes,
             "布通 " + String((summary.routed_single ?? []).length) + " 个网络，未布通 " + String((summary.failed_single ?? []).length) + " 个",
             own.ok ? "输出：" + own.output : "未产出板子",
             typeof summary.min_clearance_used === "number" && summary.min_clearance_used < preset.signalClearanceMm
