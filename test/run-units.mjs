@@ -44,6 +44,7 @@ const suites = [
   "ecad-autobuild-units.test.mjs",
   "ecad-units.test.mjs",
   "fab-tier-units.test.mjs",
+  "route-opt-units.test.mjs",
   "event-bus-units.test.mjs",
   "fault-hints-units.test.mjs",
   "pcb-units.test.mjs",
