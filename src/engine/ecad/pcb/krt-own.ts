@@ -94,6 +94,53 @@ export interface OwnRuleReport {
   log: string;
 }
 
+/** 从汇总里取这一轮没布通的网络名（不重复、保持原顺序）。 */
+export function failedNetsOf(summary: Record<string, unknown>): string[] {
+  const raw = [summary["failed_single"], summary["open_single"], summary["failed"]];
+  const names: string[] = [];
+  for (const item of raw) {
+    if (!Array.isArray(item)) continue;
+    for (const name of item) {
+      const text = String(name);
+      if (text !== "" && !names.includes(text)) names.push(text);
+    }
+  }
+  return names;
+}
+
+/**
+ * 两轮布线：第一轮按我们的规则布全部网络；没布通的，带着更大的 rip-up
+ * 预算在已布好的板子上补第二轮（而不是从头再来，那样会把第一轮的好线拆掉）。
+ */
+export async function runOwnRuleRouteWithRetry(
+  request: Parameters<typeof runOwnRuleRoute>[0],
+  options: { readonly retryRipup?: number; readonly retryMaxNets?: number } = {},
+): Promise<OwnRuleReport & { readonly retried: readonly string[] }> {
+  const first = await runOwnRuleRoute(request);
+  const failed = first.ok ? failedNetsOf(first.summary) : [];
+  const limit = options.retryMaxNets ?? 12;
+  const retried = failed.slice(0, limit);
+  if (!first.ok || retried.length === 0) return { ...first, retried: [] };
+  const second = await runOwnRuleRoute({
+    ...request,
+    inputPcb: first.output === "" ? request.inputPcb : first.output,
+    outputPcb: request.outputPcb,
+    options: {
+      ...request.options,
+      nets: retried,
+      maxRipup: options.retryRipup ?? Math.max(6, (request.options.maxRipup ?? 2) * 3),
+    },
+  });
+  if (!second.ok) return { ...first, retried: [] };
+  return {
+    ...second,
+    seconds: Math.round((first.seconds + second.seconds) * 10) / 10,
+    log: first.log + "\n--- 第二轮补布 ---\n" + second.log,
+    summary: { ...second.summary, retried_nets: retried, first_pass_failed: failed },
+    retried,
+  };
+}
+
 /** 统计产出板子里各宽度（mm，4 位）的走线段数。 */
 export function widthHistogram(pcbText: string): Record<string, number> {
   const counts: Record<string, number> = {};

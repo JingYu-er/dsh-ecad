@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copperLayersOf, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, failedNetsOf, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
 
 test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
   const argv = ownRuleArgv("C:/krt", {
@@ -57,4 +57,10 @@ test("自有规则布线：产出板子的线宽分布能数出来，细段占�
   const widths = widthHistogram(board);
   assert.equal(widths["0.3000"], 2);
   assert.equal(widths["0.1270"], 1);
+});
+
+test("自有规则布线：第一轮没布通的网点出来去重，第二轮只补这些（S197）", () => {
+  const failed = failedNetsOf({ failed_single: ["A", "B"], open_single: ["B", "C"], failed: undefined });
+  assert.deepEqual(failed, ["A", "B", "C"]);
+  assert.deepEqual(failedNetsOf({}), []);
 });
