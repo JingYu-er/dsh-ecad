@@ -1,0 +1,44 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { copperLayersOf, ownRuleArgv } from "../lib/engine/ecad/pcb/krt-own.js";
+
+test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
+  const argv = ownRuleArgv("C:/krt", {
+    inputPcb: "in.kicad_pcb",
+    outputPcb: "out.kicad_pcb",
+    options: {
+      trackWidthMm: 0.2,
+      clearanceMm: 0.15,
+      powerNets: ["*GND*", "*VCC*"],
+      powerWidthMm: 0.45,
+      layers: ["F.Cu", "B.Cu"],
+      ordering: "mps",
+      viaSizeMm: 0.45,
+      viaDrillMm: 0.25,
+      maxRipup: 2,
+      nets: ["SIG_A", "SIG_B"],
+    },
+  });
+  const text = argv.join(" ");
+  assert.ok(text.includes("py_router/route.py".replace("/", "\\")) || text.includes("route.py"));
+  assert.ok(argv.includes("--track-width") && argv[argv.indexOf("--track-width") + 1] === "0.200");
+  assert.ok(argv.includes("--clearance") && argv[argv.indexOf("--clearance") + 1] === "0.150");
+  // nargs="+" 的参数必须是多个独立 token，不能拼成 "F.Cu,B.Cu"
+  const layers = argv.slice(argv.indexOf("--layers") + 1, argv.indexOf("--layers") + 3);
+  assert.deepEqual(layers, ["F.Cu", "B.Cu"]);
+  const nets = argv.slice(argv.indexOf("--nets") + 1, argv.indexOf("--nets") + 3);
+  assert.deepEqual(nets, ["SIG_A", "SIG_B"]);
+  const powers = argv.slice(argv.indexOf("--power-nets") + 1, argv.indexOf("--power-nets") + 3);
+  assert.deepEqual(powers, ["*GND*", "*VCC*"]);
+  const widths = argv.slice(argv.indexOf("--power-nets-widths") + 1, argv.indexOf("--power-nets-widths") + 3);
+  assert.deepEqual(widths, ["0.450", "0.450"]);
+  assert.ok(argv.includes("--smoothing"));
+  assert.ok(argv.includes("--clearance-ceiling"));
+});
+
+test("自有规则布线：铜层数从 (layers …) 里数，读不到按 2 层（S195）", () => {
+  assert.equal(copperLayersOf('(layers "F.Cu" "In1.Cu" "In2.Cu" "B.Cu")'), 4);
+  assert.equal(copperLayersOf('(layers "F.Cu" "B.Cu")'), 2);
+  assert.equal(copperLayersOf("(kicad_pcb)"), 2);
+});

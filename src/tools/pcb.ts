@@ -21,6 +21,8 @@ import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.
 import { planRouting } from "../engine/ecad/pcb/router.js";
 import { buildTrackScript, parseTrackReport } from "../engine/ecad/pcb/tracks.js";
 import { optimizeRoutes } from "../engine/ecad/pcb/route-opt.js";
+import { copperLayersOf, runOwnRuleRoute } from "../engine/ecad/pcb/krt-own.js";
+import { routingPreset } from "../engine/ecad/pcb/fab-tier.js";
 import { readBoardBox, readBoardFacts } from "../engine/ecad/dfm.js";
 import { resolveProjectDir } from "./project-dir.js";
 import { resolveProjectLayout } from "../engine/project-layout.js";
@@ -399,6 +401,8 @@ export function registerPcbTools(ctx: DshContext): void {
         dryRun: { type: "boolean", description: "只出计划、不写板；默认 true。" },
         normalize: { type: "boolean", description: "先给层名补引号（tscircuit 导出的板子需要）；默认 true。" },
         apply: { type: "boolean", description: "把布好的板子写回原文件（先备份 .bak）；默认 false 只写到 <板名>.auto.kicad_pcb。" },
+        strategy: { type: "string", enum: ["krt", "own"], description: "krt = 引擎自带的整套 autoroute（默认）；own = 用我们自己的规则直接调 route.py（显式线宽/间距/电源网/45° 平滑）。" },
+        nets: { type: "array", items: { type: "string" }, description: "strategy=own 时要布的网络；缺省交给引擎按全部网络处理（耗时长）。" },
       },
       required: [],
     },
@@ -419,7 +423,7 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 1_900_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[] }, exec: ToolExec) => {
       const empty = { ok: false, error: "", dryRun: args.dryRun !== false, boardFile: "", output: "", engine: "", seconds: 0, openNets: -1, steps: [] as { tag: string; what: string; why: string; optional: boolean }[], warnings: [] as string[], notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
@@ -456,6 +460,55 @@ export function registerPcbTools(ctx: DshContext): void {
         const again = ensureDesignRules(workspace.kicadDir, rules.floor);
         if (again.changed.length > 0) notes.push("布线器重写了网络类，已按同一档再次对齐：" + again.changed.join("、"));
       };
+      if (args.strategy === "own") {
+        const preset = routingPreset(copperLayersOf(readFileSync(input, "utf8")));
+        const ownOut = board.replace(/\.kicad_pcb$/u, ".own.kicad_pcb");
+        const own = await runOwnRuleRoute({
+          subprocess: ctx.subprocess,
+          runtime: { root, python: located.toolchain.python },
+          inputPcb: input,
+          outputPcb: ownOut,
+          options: {
+            trackWidthMm: preset.signalWidthMm,
+            clearanceMm: preset.signalClearanceMm,
+            powerNets: ["*GND*", "*VCC*", "*VDD*", "*3V3*", "*5V*", "*VBUS*", "*VBAT*"],
+            powerWidthMm: preset.powerWidthMm,
+            layers: ["F.Cu", "B.Cu"],
+            ordering: "mps",
+            viaSizeMm: preset.viaDiameterMm,
+            viaDrillMm: preset.viaDrillMm,
+            maxRipup: 2,
+            boardEdgeClearanceMm: 0.3,
+            nets: args.nets ?? [],
+          },
+          signal: exec.signal,
+        });
+        restoreRules();
+        const summary = own.summary as { routed_single?: string[]; failed_single?: string[]; open_single?: string[]; min_clearance_used?: number; total_vias?: number };
+        notes.push("自有规则：线宽 " + String(preset.signalWidthMm) + " mm、间距 " + String(preset.signalClearanceMm) + " mm、电源 " + String(preset.powerWidthMm) + " mm");
+        if (typeof summary.min_clearance_used === "number" && summary.min_clearance_used < preset.signalClearanceMm) {
+          notes.push("引擎有一次降档：实际最小间距 " + String(summary.min_clearance_used) + " mm（局部挤不下时它按工艺下限走）");
+        }
+        if (args.apply === true && own.ok) {
+          copyFileSync(board, board + ".bak");
+          copyFileSync(ownOut, board);
+          notes.push("已写回 " + board + "（原文件留 .bak）");
+        }
+        return {
+          ...empty,
+          ok: own.ok,
+          error: own.error,
+          dryRun: args.apply !== true,
+          boardFile: board,
+          output: own.output,
+          engine: "KiCadRoutingTools route.py（自有规则）",
+          seconds: own.seconds,
+          openNets: -1,
+          steps: [],
+          warnings: (summary.failed_single ?? []).concat(summary.open_single ?? []).map((net) => "未布通：" + net),
+          notes,
+        };
+      }
       const report = await runKrtAutoroute({
         subprocess: ctx.subprocess,
         runtime: { root, python: located.toolchain.python },

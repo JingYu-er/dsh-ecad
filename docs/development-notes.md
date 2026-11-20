@@ -5932,7 +5932,21 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S194）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S195）
+
+### 二百零一（S195）、自有规则布线：不再让引擎按工艺下限自作主张
+
+**做了什么**：新增 `src/engine/ecad/pcb/krt-own.ts`，绕过 `autoroute.py` 直接调 `py_router/route.py`，把线宽、间距、电源网与电源线宽、层、排序策略、过孔尺寸、最多拆几次线、45° 平滑**显式传进去**；`stm32_pcb_autoroute` 增 `strategy: "krt" | "own"`（默认 krt）与 `nets` 参数。
+
+**为什么绕**：`autoroute.py` 的语义是「按工艺下限布一遍」（它自己的注释：net class 高于 floor 只是 aspirational），所以我们写进 `.kicad_dru` 的 0.2 mm 从来不是布线的目标值。`route.py` 才吃显式参数。
+
+**一个必须知道的引擎脾气**：即使显式给了 `--clearance 0.20`，局部挤不下时 `route.py` 仍会自动降档（实测 0.20 → 0.1818，并把 Default class 写回 0.1818，日志里有 `DEFAULT CLASS CLEARANCE LOWERED BY A DESCENT`）。所以报告里要如实写「引擎有一次降档：实际最小间距 x mm」，不能宣称「全程 0.2」。
+
+**真机对照**（handheld 板，清掉全部走线后布 BUZZ / LCD_RST 两个网）：
+- `route.py --track-width 0.30 --clearance 0.20 --layers F.Cu B.Cu --ordering mps --smoothing --max-ripup 2`：11.9 s、两个网都布通（`routed_single: [LCD_RST, BUZZ]`）、14 段、线宽 0.3 与 0.127（后者是焊盘处 neckdown）、`min_clearance_used 0.1818`。
+- 参数形态踩坑：`--nets`、`--layers`、`--power-nets`、`--power-nets-widths` 在 route.py 里都是 `nargs="+"`，必须传多个独立 token，拼成 `"A,B"` 会被当成一个不存在的网络名（第一次探针就因此报 `none of the requested net name(s) exist`）。
+
+**验证**：26 套件 / 292 pass / 0 fail；`pack-smoke` 通过；包体 611.4 KB / 173 文件（解包 2768.9 KB）。
 
 ### 二百（S194）、布线后处理与书本规则：先修线形，再谈拆线重试
 
