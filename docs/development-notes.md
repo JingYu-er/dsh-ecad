@@ -17,7 +17,14 @@ S194/S195 让线不再乱、也不再贴着工艺下限，但 2 层预设的间�
 
 **为什么不是三选一里的「按 3 倍铺满」**：规则的意义是让读报告的人知道哪个数在保护什么。全部按 3 倍会把布通率打下来，全部按 0.20 又等于没规则；1 倍 + 关键网 3 倍是「知道代价后的选择」。
 
-**验证**：`test/fab-tier-units.test.mjs` 断言 2 层 `signalClearanceMm === 0.3`、`criticalSpacingMm === 0.9`，4 层 `0.15 / 0.6`；26 套件 / 293 pass / 0 fail；包体 612.x KB。
+**同批还量了「细段」**：`route.py` 把焊盘出口的收窄段（neckdown）默认写到 2.5 mm，手板整块跑下来 834 段里 **491 段是 0.127 mm（68.6%）**，看着就是「线细」。两个动作：
+
+- `route.py --neckdown-length` 从默认 2.5 收到 **0.8**（只留刚够出焊盘的一小段），`OwnRuleOptions.neckdownMm` 可调；
+- 产出后统计线宽分布（`widthHistogram`），工具报告写「线宽分布：0.127 × 491、0.3 × 131、0.6 × 84…」+「细段（焊盘出口 tap）占 68.6%，共 834 段」，不把 tap 混进「信号线宽」里报。
+
+实测（handheld 整板，26 网全布、0 未布通、119 过孔）：**196 s**、`min_clearance_used 0.127`（引擎局部降档，报告照写）。降到 0.127 的是焊盘出口与密集区，主段仍是 0.3。
+
+**验证**：`test/fab-tier-units.test.mjs` 断言 2 层 `signalClearanceMm === 0.3`、`criticalSpacingMm === 0.9`，4 层 `0.15 / 0.6`；`test/krt-own-units.test.mjs` 增线宽分布用例；26 套件 / **294 pass / 0 fail**；包体 612.x KB。
 
 ### 一百九十四、设置页只读列出五处外部依赖（S187）
 

@@ -39,6 +39,8 @@ export interface OwnRuleOptions {
   smoothing?: boolean;
   /** 走线相对板边留空（mm）。 */
   boardEdgeClearanceMm?: number;
+  /** 焊盘出口收窄段长度（mm），默认 0.8；引擎默认 2.5 会让细段占比过高。 */
+  neckdownMm?: number;
 }
 
 export interface OwnRuleRequest {
@@ -84,7 +86,28 @@ export interface OwnRuleReport {
   seconds: number;
   /** route.py 写出的汇总（--json-out），字段随引擎版本变化，原样回传。 */
   summary: Record<string, unknown>;
+  /** 产出板子的走线宽度分布（mm → 段数）与「细段」统计。 */
+  widths: Record<string, number>;
+  /** 窄于请求宽度的段数占比（焊盘出口的 tap 会被引擎压到工艺下限）。 */
+  thinRatio: number;
+  segments: number;
   log: string;
+}
+
+/** 统计产出板子里各宽度（mm，4 位）的走线段数。 */
+export function widthHistogram(pcbText: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const hit of pcbText.matchAll(/\(segment\s/gu)) {
+    const start = hit.index ?? 0;
+    // 段块里第一个 ")" 只是 start 点的括号，宽度在后面，取 400 字符窗口再匹配
+    const window = pcbText.slice(start, start + 400);
+    const width = /\(width\s+([\d.]+)\)/u.exec(window);
+    if (width !== null) {
+      const key = Number(width[1]).toFixed(4);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+  }
+  return counts;
 }
 
 /** 拼 route.py 参数。单独导出是为了能单测（不跑子进程也能断言参数）。 */
@@ -97,6 +120,9 @@ export function ownRuleArgv(runtimeRoot: string, request: Omit<OwnRuleRequest, "
   args.push("--clearance-ceiling", options.clearanceMm.toFixed(3));
   // 这些参数在 route.py 里都是 nargs="+"：一个空格分隔的列表，不能拼成逗号串
   args.push("--layers", ...(options.layers ?? ["F.Cu", "B.Cu"]));
+  // 焊盘出口的收窄段（neckdown）默认 2.5 mm，会把大半条走线压成 0.127；
+  // 我们自己的规则里默认收到 0.8 mm，只留刚够出焊盘的一小段。
+  args.push("--neckdown-length", (options.neckdownMm ?? 0.8).toFixed(2));
   args.push("--ordering", options.ordering ?? "mps");
   if (options.powerNets.length > 0) {
     args.push("--power-nets", ...options.powerNets);
@@ -151,12 +177,21 @@ export async function runOwnRuleRoute(request: OwnRuleRequest): Promise<OwnRuleR
     : exitOk && produced
       ? ""
       : "布线没有产出板子：" + (tail === "" ? "引擎没有给出原因" : tail);
+  const widths = produced ? widthHistogram(readFileSync(request.outputPcb, "utf8")) : {};
+  const segments = Object.values(widths).reduce((sum, count) => sum + count, 0);
+  const requested = request.options.trackWidthMm;
+  const thin = Object.entries(widths)
+    .filter(([width]) => Number(width) < requested - 1e-6)
+    .reduce((sum, [, count]) => sum + count, 0);
   return {
     ok: error === "",
     error,
     output: produced ? request.outputPcb : "",
     seconds,
     summary,
+    widths,
+    thinRatio: segments === 0 ? 0 : thin / segments,
+    segments,
     log: result.stdout.slice(-4000),
   };
 }

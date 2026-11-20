@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copperLayersOf, ownRuleArgv } from "../lib/engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
 
 test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
   const argv = ownRuleArgv("C:/krt", {
@@ -44,4 +44,17 @@ test("自有规则布线：铜层数从 (layers …) 里数，读不到按 2 层
   // KiCad 真文件的层表是跨行嵌套的，按 [^)]* 截只会抓到一半
   const multiline = '(kicad_pcb (layers\n  (0 "F.Cu" signal)\n  (2 "B.Cu" signal)\n  (5 "F.SilkS" user)\n))';
   assert.equal(copperLayersOf(multiline), 2);
+});
+
+test("自有规则布线：产出板子的线宽分布能数出来，细段占比据此算（S196）", () => {
+  const board = [
+    "(kicad_pcb",
+    "  (segment (start 1 1) (end 2 1) (width 0.3) (layer \"F.Cu\") (net 1))",
+    "  (segment\n    (start 1 2)\n    (end 2 2)\n    (width 0.127)\n    (layer \"F.Cu\")\n    (net 1)\n  )",
+    "  (segment (start 1 3) (end 2 3) (width 0.3) (layer \"B.Cu\") (net 2))",
+    ")",
+  ].join("\n");
+  const widths = widthHistogram(board);
+  assert.equal(widths["0.3000"], 2);
+  assert.equal(widths["0.1270"], 1);
 });
