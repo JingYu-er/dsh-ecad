@@ -19,8 +19,8 @@ export interface OwnRuleOptions {
   trackWidthMm: number;
   /** 间距（mm）。 */
   clearanceMm: number;
-  /** 电源网名（逗号分隔传入 route.py）。 */
-  powerNets: readonly string[];
+  /** 电源网名（逗号分隔传入 route.py）；不给就当作没有需要加宽的电源网。 */
+  powerNets?: readonly string[];
   /** 电源线宽（mm），缺省同 trackWidthMm。 */
   powerWidthMm?: number;
   /** 只在哪些铜层布；默认 F.Cu,B.Cu。 */
@@ -93,6 +93,47 @@ export interface OwnRuleReport {
   thinRatio: number;
   segments: number;
   log: string;
+}
+
+/**
+ * 内层分配：In1 给地，In2 给「焊盘最多」的那个电源网（S199）。
+ *
+ * 一块板通常有 3V3 和 5V 两个电源，内层只有两片可用；把焊盘最多的那个
+ * 铺成平面收益最大，其余电源网继续走外层铜皮。
+ */
+export function planeAssignment(pcbText: string, copperLayers: number): { nets: string[]; layers: string[] } {
+  // 焊盘块是跨行的（(pad "" smd rect \n (size …) \n (net "GND") …），
+  // 按「下一个 (pad 之前」切片取网络名，比按括号配平简单且不会漏。
+  const padCounts = new Map<string, number>();
+  const starts: number[] = [];
+  for (let index = pcbText.indexOf("(pad "); index >= 0; index = pcbText.indexOf("(pad ", index + 5)) {
+    starts.push(index);
+  }
+  for (let cursor = 0; cursor < starts.length; cursor += 1) {
+    const end = cursor + 1 < starts.length ? starts[cursor + 1]! : pcbText.length;
+    const net = /\(net\s+"([^"]+)"\)/u.exec(pcbText.slice(starts[cursor]!, end));
+    if (net === null) continue;
+    const name = net[1] ?? "";
+    if (name === "") continue;
+    padCounts.set(name, (padCounts.get(name) ?? 0) + 1);
+  }
+  const nets: string[] = [];
+  const layers: string[] = [];
+  const ground = [...padCounts.keys()].find((name) => /^(?:GND|VSS|AGND|PGND|DGND)$/iu.test(name));
+  if (ground !== undefined) {
+    nets.push(ground);
+    layers.push("In1.Cu");
+  }
+  if (copperLayers >= 4) {
+    const power = [...padCounts.entries()]
+      .filter(([name]) => /^\+?(?:3V3|V3V3|VCC|VDD|5V|VBUS|VBAT|VIN)$/iu.test(name))
+      .sort((a, b) => b[1] - a[1])[0];
+    if (power !== undefined) {
+      nets.push(power[0]);
+      layers.push("In2.Cu");
+    }
+  }
+  return { nets, layers };
 }
 
 /** 平面铺铜（4/6 层）：GND 走内层整片，电源按需要再一层。参数用同一个 preset。 */
@@ -251,11 +292,12 @@ export function ownRuleArgv(runtimeRoot: string, request: Omit<OwnRuleRequest, "
   // 我们自己的规则里默认收到 0.8 mm，只留刚够出焊盘的一小段。
   args.push("--neckdown-length", (options.neckdownMm ?? 0.8).toFixed(2));
   args.push("--ordering", options.ordering ?? "mps");
-  if (options.powerNets.length > 0) {
-    args.push("--power-nets", ...options.powerNets);
+  const powerNets = options.powerNets ?? [];
+  if (powerNets.length > 0) {
+    args.push("--power-nets", ...powerNets);
     if (options.powerWidthMm !== undefined) {
       // 宽度按电源网逐个给，长度必须与 --power-nets 一致
-      args.push("--power-nets-widths", ...options.powerNets.map(() => options.powerWidthMm?.toFixed(3) ?? ""));
+      args.push("--power-nets-widths", ...powerNets.map(() => options.powerWidthMm?.toFixed(3) ?? ""));
     }
   }
   if (options.viaSizeMm !== undefined) args.push("--via-size", options.viaSizeMm.toFixed(3));

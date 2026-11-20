@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { copperLayersOf, failedNetsOf, ownPlaneArgv, ownRuleArgv, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
+import { copperLayersOf, failedNetsOf, ownPlaneArgv, ownRuleArgv, planeAssignment, widthHistogram } from "../lib/engine/ecad/pcb/krt-own.js";
 
 test("自有规则布线：net/layer/电源宽度都按空格分隔的列表传（S195）", () => {
   const argv = ownRuleArgv("C:/krt", {
@@ -77,4 +77,15 @@ test("4/6 层先铺平面：GND 走内层，参数用同一套 preset（S198）"
   assert.deepEqual(argv.slice(argv.indexOf("--nets"), argv.indexOf("--nets") + 2), ["--nets", "GND"]);
   assert.deepEqual(argv.slice(argv.indexOf("--plane-layers"), argv.indexOf("--plane-layers") + 2), ["--plane-layers", "In1.Cu"]);
   assert.equal(argv[argv.indexOf("--track-width") + 1], "0.450");
+});
+
+test("内层分配：地固定 In1，电源取焊盘最多的那个，2 层只有地（S199）", () => {
+  const board = (nets) =>
+    "(kicad_pcb " + nets.map((net, i) => `(pad "${i + 1}" smd rect (at 0 0) (size 0.3 0.4) (layers \"F.Cu\") (net \"${net}\"))`).join(" ") + ")";
+  const four = planeAssignment(board(["GND", "GND", "GND", "V3V3", "V3V3", "5V"]), 4);
+  assert.deepEqual(four, { nets: ["GND", "V3V3"], layers: ["In1.Cu", "In2.Cu"] });
+  // 2 层没有内层可用，只返回地
+  assert.deepEqual(planeAssignment(board(["GND", "V3V3"]), 2), { nets: ["GND"], layers: ["In1.Cu"] });
+  // 没有地网就一个平面都不铺，交给调用方回退
+  assert.deepEqual(planeAssignment(board(["SDA", "SCL"]), 4), { nets: [], layers: [] });
 });
