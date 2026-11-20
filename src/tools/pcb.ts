@@ -16,6 +16,7 @@ import { readCircuitNetlist } from "../engine/ecad/pcb/netlist.js";
 import { planPlacement } from "../engine/ecad/pcb/placement.js";
 import { countCopperLayers, ensureDesignRules } from "../engine/ecad/pcb/rules.js";
 import { buildApplyScript, parseApplyOutput } from "../engine/ecad/pcb/apply.js";
+import { planDecapMoves } from "../engine/ecad/pcb/decap-place.js";
 import { appendGroundZone, DEFAULT_POWER_NETS } from "../engine/ecad/pcb/route.js";
 import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.js";
 import { planRouting } from "../engine/ecad/pcb/router.js";
@@ -173,6 +174,11 @@ export function registerPcbTools(ctx: DshContext): void {
         projectDir: { type: "string", description: "工程根目录；缺省为会话工作目录。" },
         boardFile: { type: "string", description: "指定要改的 .kicad_pcb；缺省取 hardware/kicad 下最新的一份。" },
         keepTracks: { type: "boolean", description: "保留既有走线（默认 false：重新放置会清掉）。" },
+        refineDecaps: {
+          type: "boolean",
+          description: "放置后把去耦电容拉到它服务的电源脚旁边（默认 true；需要原理图才能认出电源输入脚）。",
+        },
+        schematicFile: { type: "string", description: "指定 .kicad_sch；缺省在板子旁边与 hardware/schematic 里找。" },
       },
       required: [],
     },
@@ -193,7 +199,10 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 120_000,
     isConcurrencySafe: () => true,
-    execute: async (args: { projectDir?: string; boardFile?: string; keepTracks?: boolean }, exec: ToolExec) => {
+    execute: async (
+      args: { projectDir?: string; boardFile?: string; keepTracks?: boolean; refineDecaps?: boolean; schematicFile?: string },
+      exec: ToolExec,
+    ) => {
       const empty = { ok: false, error: "", boardFile: "", moved: 0, missing: [] as string[], removedTracks: 0, parts: 0, boardWidth: 0, boardHeight: 0, notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
@@ -246,6 +255,42 @@ export function registerPcbTools(ctx: DshContext): void {
       if (!parsed.ok) return { ...empty, boardFile, error: "没读到放置结果：脚本没有写出结果文件（板子可能已被锁定或路径不可写）" };
 
       const notes = [...model.notes, ...plan.notes];
+
+      // 板子落下来之后焊盘坐标才知道：把去耦电容拉到它服务的电源脚旁边。
+      if (args.refineDecaps !== false) {
+        const after = readFileSync(boardFile, "utf8");
+        const schematicFile = typeof args.schematicFile === "string" && args.schematicFile !== ""
+          ? resolve(resolved.projectDir, args.schematicFile)
+          : "";
+        const decap = planDecapMoves(after, schematicFile === "" ? {} : { schematicFile });
+        notes.push(...decap.notes);
+        if (decap.moves.length > 0) {
+          const items = decap.moves.map((move) => ({ ref: move.ref, x: move.to.x, y: move.to.y, rotation: 0, kind: "passive" as const }));
+          const refineScript = buildApplyScript({
+            plan: { ok: true, error: "", board: plan.board, items, unplaced: [], notes: [] },
+            boardFile,
+            keepTracks: true,
+          });
+          const stamp = String(Date.now());
+          const refineFile = join(tmpdir(), "dsh-ecad-decap-" + stamp + ".py");
+          writeFileSync(refineFile, refineScript, "utf8");
+          const refineResult = join(tmpdir(), "dsh-ecad-decap-" + stamp + ".json");
+          const refineRun = await runCapture(ctx.subprocess, {
+            argv: [located.toolchain.python, refineFile, JSON.stringify({ boardFile, keepTracks: true, items, board: plan.board }), refineResult],
+            cwd: dirname(boardFile),
+            env: located.toolchain.env,
+            timeoutMs: 60_000,
+            maxBytes: 128_000,
+            signal: exec.signal,
+          });
+          if (refineRun.exitCode !== 0) {
+            notes.push("去耦拉近没执行成功：" + (refineRun.stderr === "" ? refineRun.stdout : refineRun.stderr).slice(-200));
+          } else {
+            const moved = parseApplyOutput(existsSync(refineResult) ? readFileSync(refineResult, "utf8") : "");
+            notes.push(moved.ok ? "去耦已落位：" + String(decap.moves.length) + " 颗" : "去耦落位结果没读到：位置可能没写进板子");
+          }
+        }
+      }
       if (parsed.missing.length > 0) notes.push("板上没有这些位号：多半是构建产物与 circuit.json 不同步，重跑构建后再放置");
       return {
         ok: true,

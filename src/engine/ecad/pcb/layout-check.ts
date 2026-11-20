@@ -170,7 +170,7 @@ function boardBoxOf(text: string): LayoutBox | null {
   };
 }
 
-function partsOf(text: string): LayoutPart[] {
+export function readBoardParts(text: string): LayoutPart[] {
   const nets = new Map<string, string>();
   for (const block of parenBlocks(text, "net")) {
     const match = /^\(net (\d+) "([^"]*)"\)$/u.exec(block.trim());
@@ -255,7 +255,7 @@ function defaultSchematicFile(boardFile: string): string {
 }
 
 /** 从原理图取电源输入脚，再按位号 + 脚号映射到 PCB 焊盘坐标。 */
-function decapPinsOf(schematicFile: string, parts: readonly LayoutPart[]): DecapPin[] {
+export function schematicDecapPins(schematicFile: string, parts: readonly LayoutPart[]): DecapPin[] {
   if (schematicFile === "" || !existsSync(schematicFile)) return [];
   let components: readonly { ref: string; pins: readonly { number: string; net: string; type: string }[] }[] = [];
   try {
@@ -279,7 +279,7 @@ function decapPinsOf(schematicFile: string, parts: readonly LayoutPart[]): Decap
   return pins;
 }
 
-function capEntries(parts: readonly LayoutPart[]): DecapCap[] {
+export function decapCaps(parts: readonly LayoutPart[]): DecapCap[] {
   const caps: DecapCap[] = [];
   for (const part of parts.filter((item) => isDecap(item))) {
     caps.push({ ref: part.ref, net: part.pads.find((pad) => POWER_NET.test(leafName(pad.net)))?.net ?? "", x: part.x, y: part.y });
@@ -332,8 +332,8 @@ function checkDecaps(
   options: LayoutNumbers,
   schematicFile: string,
 ): { findings: LayoutFinding[]; notes: readonly string[]; pins: number; pairedPins: number; uncoveredPins: number } {
-  const pins = decapPinsOf(schematicFile, parts);
-  const caps = capEntries(parts);
+  const pins = schematicDecapPins(schematicFile, parts);
+  const caps = decapCaps(parts);
   if (pins.length === 0) {
     const fallback = checkDecapsByNearest(parts, options);
     if (mcu !== null) fallback.findings.push(...checkMcuDecap(parts, mcu));
@@ -499,7 +499,7 @@ export function analyzeLayout(text: string, boardFile: string, options: LayoutOp
     return { ...EMPTY_LAYOUT, boardFile, error: "没有找到完整的 (kicad_pcb 块，文件可能被截断" };
   }
   const resolved: LayoutNumbers = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
-  const parts = partsOf(text);
+  const parts = readBoardParts(text);
   if (parts.length === 0) {
     return { ...EMPTY_LAYOUT, boardFile, error: "板子里没有带网络的封装：先确认走线与网络都在" };
   }
