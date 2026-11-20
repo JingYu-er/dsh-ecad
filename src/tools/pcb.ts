@@ -5,7 +5,7 @@
  * 布线、铺铜、检查都在后面的工具里，这里不越界。
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, readdirSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { basename, join, dirname, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { DshContext, JsonSchema, ToolDefinition, ToolExec } from "../types.js";
 import { runCapture } from "../engine/subprocess-runner.js";
@@ -16,6 +16,7 @@ import { readCircuitNetlist } from "../engine/ecad/pcb/netlist.js";
 import { planPlacement } from "../engine/ecad/pcb/placement.js";
 import { countCopperLayers, ensureDesignRules } from "../engine/ecad/pcb/rules.js";
 import { buildApplyScript, parseApplyOutput } from "../engine/ecad/pcb/apply.js";
+import { defaultSchematicFile } from "../engine/ecad/pcb/layout-check.js";
 import { planDecapMoves } from "../engine/ecad/pcb/decap-place.js";
 import { appendGroundZone, DEFAULT_POWER_NETS } from "../engine/ecad/pcb/route.js";
 import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.js";
@@ -261,7 +262,8 @@ export function registerPcbTools(ctx: DshContext): void {
       if (args.refineDecaps !== false) {
         const schematicFile = typeof args.schematicFile === "string" && args.schematicFile !== ""
           ? resolve(resolved.projectDir, args.schematicFile)
-          : "";
+          : defaultSchematicFile(boardFile);
+        if (schematicFile !== "" && args.schematicFile === undefined) notes.push("去耦落位用了板子旁边的原理图：" + basename(schematicFile));
         let total = 0;
         const movedRefs: string[] = [];
         for (let pass = 0; pass < 3; pass += 1) {

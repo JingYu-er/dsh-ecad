@@ -2888,6 +2888,12 @@ test("布局体检：数字网络名也能认出电源/地，去耦离得远按�
   // 没有原理图时分不清哪根是电源输入脚，只能降级为告警。
   assert.equal(far.severity, "warning");
   assert.match(report.notes.join(" "), /没有读到原理图/u);
+
+  // 板子旁边有同名原理图时自动认出来：不传 schematicFile 也会按 power_in 脚配对。
+  const realBoardFile = fileURLToPath(new URL("./fixtures/kicad-10-d-nfc/D_NFC.kicad_pcb", import.meta.url));
+  const realReport = analyzeLayout(readFileSync(realBoardFile, "utf8"), realBoardFile);
+  assert.ok(realReport.decap.pins >= 3, "自动认出原理图的电源输入脚：" + JSON.stringify(realReport.decap));
+  assert.equal(realReport.notes.some((note) => note.includes("没有读到原理图")), false);
   assert.match(far.message, /DVDD_3\.3V/u);
   const missing = analyzeLayout("(kicad_pcb (version 20241229) (layers \"F.Cu\"))", "board.kicad_pcb");
   assert.equal(missing.ok, false);

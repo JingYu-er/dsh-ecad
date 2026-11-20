@@ -239,7 +239,7 @@ function isDecap(part: LayoutPart): boolean {
   return power && ground;
 }
 
-function defaultSchematicFile(boardFile: string): string {
+export function defaultSchematicFile(boardFile: string): string {
   const dir = dirname(boardFile);
   const candidates = [join(dir, "schematic.kicad_sch")];
   try {
