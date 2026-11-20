@@ -477,7 +477,7 @@ export function registerPcbTools(ctx: DshContext): void {
             ordering: "mps",
             viaSizeMm: preset.viaDiameterMm,
             viaDrillMm: preset.viaDrillMm,
-            maxRipup: 2,
+            maxRipup: 5,
             boardEdgeClearanceMm: 0.3,
             nets: args.nets ?? [],
           },
@@ -486,6 +486,7 @@ export function registerPcbTools(ctx: DshContext): void {
         restoreRules();
         const summary = own.summary as { routed_single?: string[]; failed_single?: string[]; open_single?: string[]; min_clearance_used?: number; total_vias?: number };
         notes.push("自有规则：线宽 " + String(preset.signalWidthMm) + " mm、间距 " + String(preset.signalClearanceMm) + " mm、电源 " + String(preset.powerWidthMm) + " mm");
+        notes.push("关键网（时钟/差分/复位）串扰间距建议 " + String(preset.criticalSpacingMm) + " mm（3 倍线宽）；全局按 " + String(preset.signalClearanceMm) + " mm 布，两者分开看");
         if (typeof summary.min_clearance_used === "number" && summary.min_clearance_used < preset.signalClearanceMm) {
           notes.push("引擎有一次降档：实际最小间距 " + String(summary.min_clearance_used) + " mm（局部挤不下时它按工艺下限走）");
         }

@@ -71,15 +71,17 @@ test("成本档位：多层 <3.5 mil 加 20%/30%，2 层不编数字（S193）",
   assert.match(two.note, /公开文档未列/u);
 });
 
-test("成本档位：布线预设不贴下限，4 层留 1.7 倍以上余量（S193）", () => {
+test("成本档位：布线预设不贴下限，2 层间距放到 0.30（S196）", () => {
   const two = routingPreset(2);
   assert.equal(two.signalWidthMm, 0.3);
-  assert.equal(two.signalClearanceMm, 0.2);
+  assert.equal(two.signalClearanceMm, 0.3);
+  assert.equal(two.criticalSpacingMm, 0.9);
   assert.equal(two.viaDrillMm, 0.3);
 
   const four = routingPreset(4);
   assert.equal(four.signalWidthMm, 0.2);
   assert.equal(four.signalClearanceMm, 0.15);
+  assert.equal(four.criticalSpacingMm, 0.6);
   assert.equal(four.powerWidthMm, 0.45);
   assert.ok(mmToMil(four.signalClearanceMm) > 3.5);
   assert.match(four.note, /加价线/u);

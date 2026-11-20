@@ -275,6 +275,8 @@ export interface RoutingPreset {
   readonly label: string;
   readonly signalWidthMm: number;
   readonly signalClearanceMm: number;
+  /** 关键信号的串扰间距建议：3 倍线宽（Bogatin p.654：3 倍线宽时耦合降到 ~0.9%）。 */
+  readonly criticalSpacingMm: number;
   readonly powerWidthMm: number;
   readonly diffGapMm: number;
   readonly viaDiameterMm: number;
@@ -287,7 +289,11 @@ export interface RoutingPreset {
  *
  * - 4 层：信号 0.20/0.15（7.9/5.9 mil，离 3.5 mil 加价线有 1.7–2.2 倍余量）、
  *   电源 0.45、差分间距 0.20、过孔 0.45/0.25（0.25 档 +300，若介意可用 0.3/0.4 档）；
- * - 2 层：信号 0.30/0.20（11.8/7.9 mil）、电源 0.60、差分 0.25、过孔 0.60/0.30（标准档）。
+ * - 2 层：信号 0.30/0.30（11.8/11.8 mil）、电源 0.60、差分 0.25、过孔 0.60/0.30（标准档）。
+ *
+ * 2 层把间距从 0.20 提到 0.30，是为了让「3 倍线宽」这条串扰规则有落点：
+ * 0.30 线宽的 3 倍是 0.90 mm，全局按 0.90 会布不通，所以全局取 0.30，
+ * 关键网（时钟、差分、复位）用 `criticalSpacingMm` 单独放宽，报告里分开写。
  */
 export function routingPreset(layers: number): RoutingPreset {
   if (layers <= 2) {
@@ -295,12 +301,13 @@ export function routingPreset(layers: number): RoutingPreset {
       layers,
       label: "2 层·整洁档",
       signalWidthMm: 0.3,
-      signalClearanceMm: 0.2,
+      signalClearanceMm: 0.3,
+      criticalSpacingMm: 0.9,
       powerWidthMm: 0.6,
       diffGapMm: 0.25,
       viaDiameterMm: 0.6,
       viaDrillMm: 0.3,
-      note: "信号 0.30/0.20 mm（11.8/7.9 mil），过孔 0.6/0.3 在标准档，不计孔径附加",
+      note: "信号 0.30/0.30 mm（11.8/11.8 mil）；关键网按 3 倍线宽 0.90 控制串扰；过孔 0.6/0.3 在标准档，不计孔径附加",
     };
   }
   return {
@@ -308,11 +315,12 @@ export function routingPreset(layers: number): RoutingPreset {
     label: `${layers} 层·整洁档`,
     signalWidthMm: 0.2,
     signalClearanceMm: 0.15,
+    criticalSpacingMm: 0.6,
     powerWidthMm: 0.45,
     diffGapMm: 0.2,
     viaDiameterMm: 0.45,
     viaDrillMm: 0.25,
-    note: "信号 0.20/0.15 mm（7.9/5.9 mil，远离 3.5 mil 加价线）；过孔 0.45/0.25 属 +300 档，想省这 300 元就改 0.3/0.4",
+    note: "信号 0.20/0.15 mm（7.9/5.9 mil，远离 3.5 mil 加价线）；关键网按 3 倍线宽 0.60 控制串扰；过孔 0.45/0.25 属 +300 档，想省这 300 元就改 0.3/0.4",
   };
 }
 
