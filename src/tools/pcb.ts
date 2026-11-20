@@ -257,21 +257,28 @@ export function registerPcbTools(ctx: DshContext): void {
       const notes = [...model.notes, ...plan.notes];
 
       // 板子落下来之后焊盘坐标才知道：把去耦电容拉到它服务的电源脚旁边。
+      // 挪一次会改变几何，可能空出更好的位置，所以最多重排四轮、直到没有可挪的。
       if (args.refineDecaps !== false) {
-        const after = readFileSync(boardFile, "utf8");
         const schematicFile = typeof args.schematicFile === "string" && args.schematicFile !== ""
           ? resolve(resolved.projectDir, args.schematicFile)
           : "";
-        const decap = planDecapMoves(after, schematicFile === "" ? {} : { schematicFile });
-        notes.push(...decap.notes);
-        if (decap.moves.length > 0) {
+        let total = 0;
+        const movedRefs: string[] = [];
+        for (let pass = 0; pass < 3; pass += 1) {
+          const text = readFileSync(boardFile, "utf8");
+          const decap = planDecapMoves(text, {
+            ...(schematicFile === "" ? {} : { schematicFile }),
+            ...(movedRefs.length === 0 ? {} : { skipRefs: movedRefs }),
+          });
+          if (pass === 0) notes.push(...decap.notes);
+          if (decap.moves.length === 0) break;
           const items = decap.moves.map((move) => ({ ref: move.ref, x: move.to.x, y: move.to.y, rotation: 0, kind: "passive" as const }));
           const refineScript = buildApplyScript({
             plan: { ok: true, error: "", board: plan.board, items, unplaced: [], notes: [] },
             boardFile,
             keepTracks: true,
           });
-          const stamp = String(Date.now());
+          const stamp = String(Date.now()) + "-" + String(pass);
           const refineFile = join(tmpdir(), "dsh-ecad-decap-" + stamp + ".py");
           writeFileSync(refineFile, refineScript, "utf8");
           const refineResult = join(tmpdir(), "dsh-ecad-decap-" + stamp + ".json");
@@ -285,13 +292,19 @@ export function registerPcbTools(ctx: DshContext): void {
           });
           if (refineRun.exitCode !== 0) {
             notes.push("去耦拉近没执行成功：" + (refineRun.stderr === "" ? refineRun.stdout : refineRun.stderr).slice(-200));
-          } else {
-            const moved = parseApplyOutput(existsSync(refineResult) ? readFileSync(refineResult, "utf8") : "");
-            notes.push(moved.ok ? "去耦已落位：" + String(decap.moves.length) + " 颗" : "去耦落位结果没读到：位置可能没写进板子");
+            break;
           }
+          const moved = parseApplyOutput(existsSync(refineResult) ? readFileSync(refineResult, "utf8") : "");
+          if (!moved.ok) {
+            notes.push("去耦落位结果没读到：位置可能没写进板子");
+            break;
+          }
+          total += decap.moves.length;
+          for (const move of decap.moves) movedRefs.push(move.ref);
+          if (pass > 0) notes.push("第 " + String(pass + 1) + " 轮又挪了 " + String(decap.moves.length) + " 颗");
         }
+        if (total > 0) notes.push("去耦落位合计：" + String(total) + " 颗次");
       }
-      if (parsed.missing.length > 0) notes.push("板上没有这些位号：多半是构建产物与 circuit.json 不同步，重跑构建后再放置");
       return {
         ok: true,
         error: "",

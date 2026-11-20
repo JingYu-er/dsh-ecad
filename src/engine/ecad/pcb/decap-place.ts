@@ -43,6 +43,8 @@ export interface DecapPlaceOptions {
   minGainMm?: number;
   /** 原理图；没有就按「同网最近焊盘」当目标。 */
   schematicFile?: string;
+  /** 这批电容在之前几轮已经挪过：不再动它们，避免在两点之间来回摆。 */
+  skipRefs?: readonly string[];
 }
 
 interface Box {
@@ -109,6 +111,7 @@ export function planDecapMoves(
     for (const pair of pinReport.caps) {
       const cap = byRef.get(pair.cap);
       if (cap === undefined) continue;
+      if (options.skipRefs !== undefined && options.skipRefs.includes(cap.ref)) continue;
       // 以「芯片中心 → 电源脚」的方向朝外，电容放在脚的外侧，避免压到芯片本体。
       const dx = pin.x - host.x;
       const dy = pin.y - host.y;
