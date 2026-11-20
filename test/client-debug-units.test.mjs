@@ -257,6 +257,8 @@ test("电路设计页能用自有规则布线（S195）", () => {
   const text = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(text.includes("自有规则布线"));
   assert.ok(text.includes('"route-own"'));
+  // 布线完要把引擎的话（线宽分布、细段占比、补布轮次）原样摊开，不能只报「成功」
+  assert.ok(text.includes('key: "route-notes"'));
 });
 
 test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲染（S151）", () => {
