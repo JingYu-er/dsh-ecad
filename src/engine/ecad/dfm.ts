@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { estimateFabCost } from "./pcb/fab-tier.js";
 
 /** 嘉立创常规工艺参数（单位 mm）。改这里等于改全链路的判据。 */
 export interface FabRules {
@@ -367,6 +368,38 @@ export function checkDfm(pcbText: string, rules: FabRules = JLC_STANDARD): Omit<
       severity: "info",
       message: `板子 ${facts.widthMm}×${facts.heightMm} mm，超出 100×100 最低价档`,
       fix: "能拆板或缩尺寸就缩；拼板不降单价，只省运费与贴片费",
+    });
+  }
+  // 成本档位（S193）：走线/孔径/层压三条加价线，报出来而不是等下单页发现
+  const fab = estimateFabCost({
+    layers: facts.layers,
+    minTrackMm: facts.minTrackMm,
+    // 板上没量间距，用规则里的声明值当保守估计
+    minClearanceMm: rules.minClearanceMm,
+    minDrillMm: facts.minDrillMm,
+  });
+  if (fab.trace.tier === "fine") {
+    findings.push({
+      rule: "dfm.trace-tier",
+      severity: "info",
+      message: fab.trace.note,
+      fix: `抬到 ${fab.preset.signalWidthMm.toFixed(2)} mm 宽、间距 ${fab.preset.signalClearanceMm.toFixed(2)} mm（${fab.preset.label}）就离开加价线`,
+    });
+  }
+  if (fab.hole.addYuan > 0) {
+    findings.push({
+      rule: "dfm.hole-tier",
+      severity: "info",
+      message: fab.hole.note,
+      fix: `过孔改到 0.3/0.4 mm（标准档）就不加这 ${fab.hole.addYuan} 元；高频/大电流需要小孔时再权衡`,
+    });
+  }
+  if (!fab.stackup.free) {
+    findings.push({
+      rule: "dfm.stackup-tier",
+      severity: "info",
+      message: fab.stackup.note,
+      fix: "4 层用 JLC04161H-3313、6 层用 JLC06161H-3313 是免费结构；别的板厚/铜厚/PP 组合要加 100–300 元/款",
     });
   }
   if (facts.viaCount === 0 && facts.layers <= 2) {
