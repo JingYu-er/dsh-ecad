@@ -44,6 +44,7 @@ const suites = [
   "ecad-autobuild-units.test.mjs",
   "ecad-units.test.mjs",
   "fab-tier-units.test.mjs",
+  "decap-plan-units.test.mjs",
   "route-opt-units.test.mjs",
   "track-merge-units.test.mjs",
   "krt-own-units.test.mjs",

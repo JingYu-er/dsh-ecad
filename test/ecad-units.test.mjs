@@ -2837,6 +2837,29 @@ test("环境变量：新名优先，旧名（DSH_STM32_*）仍认（S192）", as
   assert.equal(envValue({}, "HOME"), undefined);
 });
 
+test("布局体检：有原理图时按电源输入脚配对，地脚不要求脚边电容（S204）", async () => {
+  const { fileURLToPath } = await import("node:url");
+  const { readLayout } = await import("../lib/engine/ecad/pcb/layout-check.js");
+  const dir = fileURLToPath(new URL("./fixtures/kicad-10-d-nfc/", import.meta.url));
+  const report = readLayout(dir + "D_NFC.kicad_pcb", undefined, { schematicFile: dir + "D_NFC.kicad_sch" });
+  assert.equal(report.ok, true, report.error);
+  assert.ok(report.decap.pins >= 3, "原理图里有 5 个 power_in，去掉地脚后仍应有 3 个以上：" + JSON.stringify(report.decap));
+  // paired = 分到电容的脚，uncovered = 所在网络一颗电容都没有的脚；
+  // 同一个网络多个脚时，没分到电容的脚靠平面/铜皮供电，不计入 uncovered。
+  assert.ok(report.decap.paired >= 1, "至少有一个电源脚分到了电容：" + JSON.stringify(report.decap));
+  assert.ok(report.decap.paired + report.decap.uncovered <= report.decap.pins);
+  // 整条网络一颗电容都没有才报警；「多脚共用电容」不应逐脚报。
+  assert.ok(
+    !report.findings.some((finding) => finding.id === "layout.pin-no-decap"),
+    "多脚共用电容时不该逐脚报缺失：" + JSON.stringify(report.findings.map((f) => f.id)),
+  );
+  assert.ok(
+    !report.findings.some((finding) => finding.id === "layout.net-no-decap"),
+    "VCC 网络上有电容，不该报整网缺失",
+  );
+  assert.ok(report.findings.every((finding) => !/GND 脚/u.test(finding.message)), "地脚不参与去耦检查");
+});
+
 test("布局体检：数字网络名也能认出电源/地，去耦离得远按距离分档（S203）", () => {
   const board = [
     "(kicad_pcb (version 20241229)",
@@ -2862,7 +2885,9 @@ test("布局体检：数字网络名也能认出电源/地，去耦离得远按�
   assert.equal(report.mcu, "");
   const far = report.findings.find((finding) => finding.id === "layout.decap-far");
   assert.ok(far !== undefined, "30 mm 外的去耦电容要点名：" + JSON.stringify(report.findings));
-  assert.equal(far.severity, "error");
+  // 没有原理图时分不清哪根是电源输入脚，只能降级为告警。
+  assert.equal(far.severity, "warning");
+  assert.match(report.notes.join(" "), /没有读到原理图/u);
   assert.match(far.message, /DVDD_3\.3V/u);
   const missing = analyzeLayout("(kicad_pcb (version 20241229) (layers \"F.Cu\"))", "board.kicad_pcb");
   assert.equal(missing.ok, false);

@@ -5,8 +5,11 @@
 // 走线质量、层数、阻抗这些属于布线参数（fab-tier / krt-own），不在这里判。
 
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
+import { readSchematic } from "../../schematic/model.js";
+import { planDecaps, type DecapCap, type DecapPin } from "./decap-plan.js";
 import { parenBlocks } from "./emc.js";
 
 export type LayoutSeverity = "info" | "warning" | "error";
@@ -36,6 +39,15 @@ export interface LayoutBox {
   readonly y1: number;
 }
 
+export interface LayoutDecapSummary {
+  /** 原理图里的电源输入脚数量（不含地脚）。 */
+  readonly pins: number;
+  /** 至少分到一颗电容的电源脚数量。 */
+  readonly paired: number;
+  /** 所在网络一颗电容都没有的电源脚数量。 */
+  readonly uncovered: number;
+}
+
 export interface LayoutReport {
   readonly ok: boolean;
   readonly error: string;
@@ -44,6 +56,7 @@ export interface LayoutReport {
   readonly widthMm: number;
   readonly heightMm: number;
   readonly mcu: string;
+  readonly decap: LayoutDecapSummary;
   readonly parts: readonly LayoutPart[];
   readonly findings: readonly LayoutFinding[];
   readonly notes: readonly string[];
@@ -62,9 +75,13 @@ export interface LayoutOptions {
   readonly mcuEdgeMm?: number;
   /** 电源入口到载流器件（电感/LDO）的最大距离。 */
   readonly powerEntryMm?: number;
+  /** 原理图文件；给了才能按 `power_in` 引脚配对去耦电容。 */
+  readonly schematicFile?: string;
 }
 
-export const DEFAULT_LAYOUT_OPTIONS: Required<LayoutOptions> = {
+type LayoutNumbers = Required<Omit<LayoutOptions, "schematicFile">>;
+
+export const DEFAULT_LAYOUT_OPTIONS: LayoutNumbers = {
   decapMm: 5,
   decapErrorMm: 10,
   crystalMm: 12,
@@ -81,6 +98,7 @@ export const EMPTY_LAYOUT: LayoutReport = {
   widthMm: 0,
   heightMm: 0,
   mcu: "",
+  decap: { pins: 0, paired: 0, uncovered: 0 },
   parts: [],
   findings: [],
   notes: [],
@@ -178,8 +196,10 @@ function partsOf(text: string): LayoutPart[] {
     for (const padBlock of parenBlocks(block, "pad")) {
       const number = first(padBlock, /^\(pad "([^"]*)"/u);
       // 两种写法都有：tscircuit 出来的板子写 `(net "GND")`，KiCad 自己存的是 `(net 13)`。
-      const netMatch = /\(net (?:"([^"]*)"|(\d+))\)/u.exec(padBlock);
-      const netRaw = netMatch === null ? null : (netMatch[1] ?? nameOf(netMatch[2] as string));
+      // 三种写法都要认：`(net "GND")`、`(net 13)`、`(net 13 "GND")`（tscircuit 给的是第三种）。
+      const netMatch = /\(net (?:(\d+)(?: "([^"]*)")?|"([^"]*)")\)/u.exec(padBlock);
+      const netRaw =
+        netMatch === null ? null : (netMatch[3] ?? netMatch[2] ?? nameOf(netMatch[1] as string));
       const padAt = /\(at ([-\d.]+) ([-\d.]+)(?: ([-\d.]+))?\)/u.exec(padBlock);
       if (number === null || netRaw === null || padAt === null) continue;
       const point = rotate(Number(padAt[1]), Number(padAt[2]), fr);
@@ -219,7 +239,59 @@ function isDecap(part: LayoutPart): boolean {
   return power && ground;
 }
 
-function checkDecaps(parts: readonly LayoutPart[], mcu: LayoutPart | null, options: Required<LayoutOptions>): LayoutFinding[] {
+function defaultSchematicFile(boardFile: string): string {
+  const dir = dirname(boardFile);
+  const candidates = [join(dir, "schematic.kicad_sch")];
+  try {
+    for (const entry of readdirSync(dir)) {
+      if (entry.endsWith(".kicad_sch")) candidates.push(join(dir, entry));
+    }
+  } catch {
+    // 读不到目录就只用候选
+  }
+  // 手绘层在 <工程>/hardware/schematic/，板子在 <工程>/hardware/kicad/。
+  candidates.push(join(dir, "..", "schematic", "schematic.kicad_sch"));
+  return candidates.find((file) => existsSync(file)) ?? "";
+}
+
+/** 从原理图取电源输入脚，再按位号 + 脚号映射到 PCB 焊盘坐标。 */
+function decapPinsOf(schematicFile: string, parts: readonly LayoutPart[]): DecapPin[] {
+  if (schematicFile === "" || !existsSync(schematicFile)) return [];
+  let components: readonly { ref: string; pins: readonly { number: string; net: string; type: string }[] }[] = [];
+  try {
+    components = readSchematic(schematicFile).report.components;
+  } catch {
+    return [];
+  }
+  const byRef = new Map(parts.map((part) => [part.ref, part]));
+  const pins: DecapPin[] = [];
+  for (const component of components) {
+    const part = byRef.get(component.ref);
+    if (part === undefined) continue;
+    for (const pin of component.pins) {
+      // 地脚不是「电源输入」：它们靠平面回流，不要求脚边有去耦电容。
+      if (pin.type !== "power_in" || pin.net === "" || GROUND_NET.test(leafName(pin.net))) continue;
+      const pad = part.pads.find((item) => item.number === pin.number);
+      if (pad === undefined) continue;
+      pins.push({ ref: component.ref, pin: pin.number, net: pad.net, x: pad.x, y: pad.y });
+    }
+  }
+  return pins;
+}
+
+function capEntries(parts: readonly LayoutPart[]): DecapCap[] {
+  const caps: DecapCap[] = [];
+  for (const part of parts.filter((item) => isDecap(item))) {
+    caps.push({ ref: part.ref, net: part.pads.find((pad) => POWER_NET.test(leafName(pad.net)))?.net ?? "", x: part.x, y: part.y });
+  }
+  return caps.filter((cap) => cap.net !== "");
+}
+
+/** 没有原理图时的降级：只按「最近 IC 焊盘」判，并说明判不出电源输入脚。 */
+function checkDecapsByNearest(
+  parts: readonly LayoutPart[],
+  options: LayoutNumbers,
+): { findings: LayoutFinding[]; notes: readonly string[] } {
   const findings: LayoutFinding[] = [];
   const targets = parts.filter((part) => !PASSIVE_REF.test(part.ref));
   for (const cap of parts.filter((part) => isDecap(part))) {
@@ -233,33 +305,118 @@ function checkDecaps(parts: readonly LayoutPart[], mcu: LayoutPart | null, optio
         if (nearest === null || d < nearest.distance) nearest = { ref: target.ref, distance: d, pin: pad.number };
       }
     }
-    if (nearest === null) continue;
-    if (nearest.distance <= options.decapMm) continue;
-    const severity: LayoutSeverity = nearest.distance > options.decapErrorMm ? "error" : "warning";
+    if (nearest === null || nearest.distance <= options.decapMm) continue;
     findings.push({
       id: "layout.decap-far",
-      severity,
+      severity: "warning",
       message: `${cap.ref} 是 ${powerPad.net} 的去耦电容，离 ${nearest.ref} 的 ${powerPad.net} 脚（pin ${nearest.pin}）${round2(nearest.distance)} mm（目标 ≤ ${options.decapMm} mm）`,
-      fix: "把去耦电容挪到该电源脚旁边，回流路径也就跟着短了；同时确认另一脚就近下地。",
+      fix: "把去耦电容挪到该电源脚旁边；同时确认另一脚就近下地。",
       refs: [cap.ref, nearest.ref],
     });
   }
-  if (mcu !== null && !findings.some((finding) => finding.refs.includes(mcu.ref))) {
-    const mcuCaps = parts.filter((part) => isDecap(part) && part.pads.some((pad) => mcu.pads.some((mpad) => mpad.net === pad.net)));
-    if (mcuCaps.length === 0) {
+  return {
+    findings,
+    notes: ["没有读到原理图，去耦只按「最近 IC 焊盘」判：分不清哪些脚是电源输入脚，多电源脚芯片可能误报。"],
+  };
+}
+
+/**
+ * 去耦检查：以「电源输入脚」为中心配对。
+ *
+ * 一颗芯片十几个电源脚、一个网络十几颗电容时，「每颗电容都 ≤5 mm」既放不下也不合理；
+ * 这里改成每颗电容归给同网最近的电源脚，再按脚看「最近的一颗有多远」。
+ */
+function checkDecaps(
+  parts: readonly LayoutPart[],
+  mcu: LayoutPart | null,
+  options: LayoutNumbers,
+  schematicFile: string,
+): { findings: LayoutFinding[]; notes: readonly string[]; pins: number; pairedPins: number; uncoveredPins: number } {
+  const pins = decapPinsOf(schematicFile, parts);
+  const caps = capEntries(parts);
+  if (pins.length === 0) {
+    const fallback = checkDecapsByNearest(parts, options);
+    if (mcu !== null) fallback.findings.push(...checkMcuDecap(parts, mcu));
+    return { ...fallback, pins: 0, pairedPins: 0, uncoveredPins: 0 };
+  }
+
+  const plan = planDecaps(pins, caps);
+  const findings: LayoutFinding[] = [];
+  // 同一个网络上多颗电源脚、电容数少于脚数时，没分到电容的脚是正常的：
+  // 它们靠同一网络的平面/铜皮供电。所以只在「整条网络一颗电容都没有」时报警，
+  // 其余写进 notes 汇总，不逐脚报。
+  const capCountByNet = new Map<string, number>();
+  for (const cap of caps) capCountByNet.set(cap.net, (capCountByNet.get(cap.net) ?? 0) + 1);
+  const uncoveredByNet = new Map<string, number>();
+  for (const pin of plan.pins) {
+    if (pin.nearestMm !== null) continue;
+    uncoveredByNet.set(pin.net, (uncoveredByNet.get(pin.net) ?? 0) + 1);
+  }
+  for (const [net, count] of uncoveredByNet) {
+    if ((capCountByNet.get(net) ?? 0) > 0) continue;
+    findings.push({
+      id: "layout.net-no-decap",
+      severity: "warning",
+      message: `网络 ${net} 上有 ${count} 个电源输入脚，但整条网络上没有去耦电容`,
+      fix: "给这条网络的电源脚各配一颗 100 nF（同容值可分摊），并在主电源入口加一颗 1–10 µF。",
+      refs: pins.filter((pin) => pin.net === net).map((pin) => pin.ref),
+    });
+  }
+  for (const pin of plan.pins) {
+    const where = `${pin.ref} 的 ${pin.net} 脚（pin ${pin.pin}）`;
+    if (pin.nearestMm === null) continue;
+    if (pin.nearestMm > options.decapErrorMm) {
       findings.push({
-        id: "layout.mcu-no-decap",
+        id: "layout.pin-decap-far",
+        severity: "error",
+        message: `${where}最近的一颗去耦电容在 ${round2(pin.nearestMm)} mm 外（${pin.caps[0]?.cap ?? "?"}，目标 ≤ ${options.decapMm} mm）`,
+        fix: "把这颗电容挪到该脚旁边；多电源脚芯片按脚就近分配，不要一颗电容兼顾多个脚。",
+        refs: [pin.ref, pin.caps[0]?.cap ?? ""].filter((ref) => ref !== ""),
+      });
+    } else if (pin.nearestMm > options.decapMm) {
+      findings.push({
+        id: "layout.pin-decap-far",
         severity: "warning",
-        message: `${mcu.ref}（${mcu.pads.length} 脚）周围没有识别到去耦电容`,
-        fix: "每个电源脚配一颗 100 nF，主电源再加一颗 1–10 µF；位置贴着引脚，不要靠布线兜。",
-        refs: [mcu.ref],
+        message: `${where}最近的一颗去耦电容在 ${round2(pin.nearestMm)} mm 外（${pin.caps[0]?.cap ?? "?"}，目标 ≤ ${options.decapMm} mm）`,
+        fix: "把电容挪到该脚旁边，回流路径也就跟着短了。",
+        refs: [pin.ref, pin.caps[0]?.cap ?? ""].filter((ref) => ref !== ""),
+      });
+    }
+    if (pin.crowded >= 3) {
+      findings.push({
+        id: "layout.pin-crowded",
+        severity: "info",
+        message: `${where}周围 ${options.decapMm} mm 内挤了 ${pin.crowded} 颗去耦电容，注意摆位与焊盘间隙`,
+        fix: "同一颗电源脚留 1–2 颗就够，其余按脚分流；挤不下就把电容分到相邻同类电源脚。",
+        refs: [pin.ref],
       });
     }
   }
-  return findings;
+  if (mcu !== null) findings.push(...checkMcuDecap(parts, mcu));
+  const pairedPins = plan.pins.filter((pin) => pin.nearestMm !== null).length;
+  const uncoveredPins = uncoveredByNet.size === 0
+    ? 0
+    : [...uncoveredByNet].reduce((sum, [net, count]) => sum + ((capCountByNet.get(net) ?? 0) === 0 ? count : 0), 0);
+  return { findings, notes: [...plan.notes], pins: plan.pins.length, pairedPins, uncoveredPins };
 }
 
-function checkCrystal(parts: readonly LayoutPart[], mcu: LayoutPart | null, options: Required<LayoutOptions>): LayoutFinding[] {
+function checkMcuDecap(parts: readonly LayoutPart[], mcu: LayoutPart): LayoutFinding[] {
+  const mcuCaps = parts.filter(
+    (part) => isDecap(part) && part.pads.some((pad) => mcu.pads.some((mpad) => mpad.net === pad.net)),
+  );
+  if (mcuCaps.length > 0) return [];
+  return [
+    {
+      id: "layout.mcu-no-decap",
+      severity: "warning",
+      message: `${mcu.ref}（${mcu.pads.length} 脚）周围没有识别到去耦电容`,
+      fix: "每个电源脚配一颗 100 nF，主电源再加一颗 1–10 µF；位置贴着引脚，不要靠布线兜。",
+      refs: [mcu.ref],
+    },
+  ];
+}
+
+function checkCrystal(parts: readonly LayoutPart[], mcu: LayoutPart | null, options: LayoutNumbers): LayoutFinding[] {
   if (mcu === null) return [];
   const crystals = parts.filter((part) => {
     // 负载电容（18pf 之类）不算晶振：它们是晶振的邻居，不是晶振。
@@ -280,7 +437,7 @@ function checkCrystal(parts: readonly LayoutPart[], mcu: LayoutPart | null, opti
     }));
 }
 
-function checkConnectors(parts: readonly LayoutPart[], box: LayoutBox | null, options: Required<LayoutOptions>): LayoutFinding[] {
+function checkConnectors(parts: readonly LayoutPart[], box: LayoutBox | null, options: LayoutNumbers): LayoutFinding[] {
   if (box === null) return [];
   const findings: LayoutFinding[] = [];
   for (const part of parts.filter((item) => CONNECTOR_REF.test(item.ref))) {
@@ -297,7 +454,7 @@ function checkConnectors(parts: readonly LayoutPart[], box: LayoutBox | null, op
   return findings;
 }
 
-function checkMcuEdge(mcu: LayoutPart | null, box: LayoutBox | null, options: Required<LayoutOptions>): LayoutFinding[] {
+function checkMcuEdge(mcu: LayoutPart | null, box: LayoutBox | null, options: LayoutNumbers): LayoutFinding[] {
   if (mcu === null || box === null) return [];
   const edge = Math.min(mcu.x - mcu.widthMm / 2 - box.x0, box.x1 - (mcu.x + mcu.widthMm / 2), mcu.y - mcu.heightMm / 2 - box.y0, box.y1 - (mcu.y + mcu.heightMm / 2));
   if (edge >= options.mcuEdgeMm) return [];
@@ -312,7 +469,7 @@ function checkMcuEdge(mcu: LayoutPart | null, box: LayoutBox | null, options: Re
   ];
 }
 
-function checkPowerEntry(parts: readonly LayoutPart[], options: Required<LayoutOptions>): LayoutFinding[] {
+function checkPowerEntry(parts: readonly LayoutPart[], options: LayoutNumbers): LayoutFinding[] {
   const findings: LayoutFinding[] = [];
   for (const part of parts) {
     const entry = part.pads.find((pad) => POWER_IN_NET.test(leafName(pad.net)));
@@ -341,15 +498,22 @@ export function analyzeLayout(text: string, boardFile: string, options: LayoutOp
   if (!text.includes("(kicad_pcb") || parenBlocks(text, "kicad_pcb").length === 0) {
     return { ...EMPTY_LAYOUT, boardFile, error: "没有找到完整的 (kicad_pcb 块，文件可能被截断" };
   }
-  const resolved = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
+  const resolved: LayoutNumbers = { ...DEFAULT_LAYOUT_OPTIONS, ...options };
   const parts = partsOf(text);
   if (parts.length === 0) {
     return { ...EMPTY_LAYOUT, boardFile, error: "板子里没有带网络的封装：先确认走线与网络都在" };
   }
   const box = boardBoxOf(text);
   const mcu = mcuOf(parts);
+  const schematicFile = options.schematicFile ?? defaultSchematicFile(boardFile);
+  const decap = checkDecaps(parts, mcu, resolved, schematicFile);
+  const decapSummary: LayoutDecapSummary = {
+    pins: decap.pins,
+    paired: decap.pairedPins,
+    uncovered: decap.uncoveredPins,
+  };
   const findings = [
-    ...checkDecaps(parts, mcu, resolved),
+    ...decap.findings,
     ...checkCrystal(parts, mcu, resolved),
     ...checkConnectors(parts, box, resolved),
     ...checkMcuEdge(mcu, box, resolved),
@@ -359,6 +523,7 @@ export function analyzeLayout(text: string, boardFile: string, options: LayoutOp
   if (box === null) notes.push("读不到板框（Edge.Cuts），接口与主控的贴边检查已跳过。");
   if (mcu === null) notes.push("认不出主控（没有 ≥24 脚的 U 件），晶振与主控贴边检查已跳过。");
   if (!parts.some((part) => isDecap(part))) notes.push("没有识别到去耦电容（两脚 C，且一脚电源一脚地）：确认板上电容都带网络。");
+  for (const note of decap.notes) notes.push(note);
   notes.push("只比距离与位置：走线宽度、层数与阻抗由 fab-tier / 布线参数负责。");
   const order: Record<LayoutSeverity, number> = { error: 0, warning: 1, info: 2 };
   return {
@@ -369,6 +534,7 @@ export function analyzeLayout(text: string, boardFile: string, options: LayoutOp
     widthMm: box === null ? 0 : round2(box.x1 - box.x0),
     heightMm: box === null ? 0 : round2(box.y1 - box.y0),
     mcu: mcu?.ref ?? "",
+    decap: decapSummary,
     parts,
     findings: [...findings].sort((left, right) => order[left.severity] - order[right.severity]),
     notes,

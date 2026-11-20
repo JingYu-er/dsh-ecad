@@ -2130,6 +2130,16 @@ export function registerPcbTools(ctx: DshContext): void {
       widthMm: { type: "number" },
       heightMm: { type: "number" },
       mcu: { type: "string" },
+      decap: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          pins: { type: "number" },
+          paired: { type: "number" },
+          uncovered: { type: "number" },
+        },
+        required: ["pins", "paired", "uncovered"],
+      },
       partCount: { type: "number" },
       findings: {
         type: "array",
@@ -2148,7 +2158,7 @@ export function registerPcbTools(ctx: DshContext): void {
       },
       notes: { type: "array", items: { type: "string" } },
     },
-    required: ["ok", "error", "boardFile", "widthMm", "heightMm", "mcu", "partCount", "findings", "notes"],
+    required: ["ok", "error", "boardFile", "widthMm", "heightMm", "mcu", "decap", "partCount", "findings", "notes"],
   };
 
   const layoutTool: ToolDefinition = {
@@ -2161,6 +2171,10 @@ export function registerPcbTools(ctx: DshContext): void {
       properties: {
         projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
         boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        schematicFile: {
+          type: "string",
+          description: "指定 .kicad_sch；给了才能按原理图的电源输入脚配对去耦电容。缺省在板子旁边与 hardware/schematic 里找。",
+        },
         decapMm: { type: "number", description: "去耦电容到电源脚的距离上限（mm），默认 5。" },
         crystalMm: { type: "number", description: "晶振到主控中心点的距离上限（mm），默认 12。" },
         connectorEdgeMm: { type: "number", description: "接口中心到板边的距离上限（mm），默认 8。" },
@@ -2186,6 +2200,13 @@ export function registerPcbTools(ctx: DshContext): void {
           "布局体检：" + String(result.widthMm) + " × " + String(result.heightMm) + " mm · " + String(result.partCount)
             + " 个带网络的封装 · 主控 " + (result.mcu === "" ? "（认不出）" : result.mcu),
         ];
+        const decap = (value as { decap?: { pins: number; paired: number; uncovered: number } }).decap;
+        if (decap !== undefined && decap.pins > 0) {
+          lines.push(
+            "去耦：" + String(decap.pins) + " 个电源输入脚，其中 " + String(decap.paired)
+              + " 个分到电容，" + String(decap.uncovered) + " 个所在网络没有电容",
+          );
+        }
         if (result.findings.length === 0) lines.push("没有发现需要挪的器件。");
         for (const finding of result.findings) lines.push((label[finding.severity] ?? finding.severity) + "：" + finding.message + " → " + finding.fix);
         for (const note of result.notes) lines.push("说明：" + note);
@@ -2194,7 +2215,17 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 30_000,
     isConcurrencySafe: () => true,
-    execute: async (args: { projectDir?: string; boardFile?: string; decapMm?: number; crystalMm?: number; connectorEdgeMm?: number }, exec: ToolExec) => {
+    execute: async (
+      args: {
+        projectDir?: string;
+        boardFile?: string;
+        schematicFile?: string;
+        decapMm?: number;
+        crystalMm?: number;
+        connectorEdgeMm?: number;
+      },
+      exec: ToolExec,
+    ) => {
       const empty = {
         ok: false,
         error: "",
@@ -2202,6 +2233,7 @@ export function registerPcbTools(ctx: DshContext): void {
         widthMm: 0,
         heightMm: 0,
         mcu: "",
+        decap: { pins: 0, paired: 0, uncovered: 0 },
         partCount: 0,
         findings: [] as Array<Record<string, unknown>>,
         notes: [] as string[],
@@ -2219,6 +2251,9 @@ export function registerPcbTools(ctx: DshContext): void {
       }
       if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
       const report = readLayout(boardFile, undefined, {
+        ...(typeof args.schematicFile === "string" && args.schematicFile !== ""
+          ? { schematicFile: resolve(resolved.projectDir, args.schematicFile) }
+          : {}),
         ...(typeof args.decapMm === "number" ? { decapMm: args.decapMm } : {}),
         ...(typeof args.crystalMm === "number" ? { crystalMm: args.crystalMm } : {}),
         ...(typeof args.connectorEdgeMm === "number" ? { connectorEdgeMm: args.connectorEdgeMm } : {}),
@@ -2231,6 +2266,7 @@ export function registerPcbTools(ctx: DshContext): void {
         widthMm: report.widthMm,
         heightMm: report.heightMm,
         mcu: report.mcu,
+        decap: report.decap,
         partCount: report.parts.length,
         findings: report.findings.map((finding) => ({
           id: finding.id,
