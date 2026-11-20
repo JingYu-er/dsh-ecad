@@ -16,6 +16,7 @@ import { exportEmbeddedLibraries } from "./libs.js";
 import { mergeCoincidentPads } from "./padmerge.js";
 import { precheckFootprints } from "./padprecheck.js";
 import { krtRoot, krtStatus, quoteLayerNames, runKrtAutoroute, runKrtConnectedCheck } from "./pcb/krt.js";
+import { readLayout } from "./pcb/layout-check.js";
 import { countCopperLayers, druFloorForLayers, ensureDesignRules } from "./pcb/rules.js";
 import type { EcadToolchain } from "./toolchain.js";
 import { runTsciBuild, type EcadWorkspace } from "./tsci.js";
@@ -138,6 +139,27 @@ export async function runEcadDesign(request: DesignRequest): Promise<DesignResul
       : libs.error,
     started,
   );
+
+  // 4.4 布局体检（S203）：布线之前先把「摆错了」的器件指出来。
+  // 去耦电容离电源脚太远、晶振离主控太远这类问题，布线器不会修，只会绕着它们布线。
+  if (request.pcb === true && pcbFile !== "") {
+    started = Date.now();
+    const layout = readLayout(pcbFile);
+    const errors = layout.findings.filter((finding) => finding.severity === "error").length;
+    const warnings = layout.findings.filter((finding) => finding.severity === "warning").length;
+    record(
+      "布局体检",
+      layout.ok && errors === 0,
+      layout.ok
+        ? (errors === 0 ? "" : String(errors) + " 处错误 / ") + String(warnings) + " 处告警 / " + String(layout.findings.length) + " 条"
+        : layout.error,
+      started,
+    );
+    for (const finding of layout.findings.filter((item) => item.severity !== "info").slice(0, 3)) {
+      notes.push("布局：" + finding.message + " —— " + finding.fix);
+    }
+    if (layout.findings.length > 3) notes.push("布局体检共 " + String(layout.findings.length) + " 条，完整清单用 stm32_pcb_layout 看。");
+  }
 
   // 4.5 布线（S146）：外部引擎自带的平面/扇出/去耦/布线四步，缺引擎就跳过而不是失败。
   if (request.pcb === true && pcbFile !== "") {

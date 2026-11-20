@@ -363,3 +363,12 @@ test("3D 预览里能一键换封装、能导出 GLB 与 STEP（S182/S183）", (
   assert.ok(source.includes("导出 STEP"), "面板要有 STEP 按钮");
   assert.ok(source.includes("已导出 "), "导出完要显示文件与大小");
 });
+
+test("电路设计页能看布局体检：去耦/晶振/接口三类问题都在面板上（S203）", () => {
+  const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
+  assert.ok(source.includes("function useLayoutCheck("), "要有 useLayoutCheck");
+  assert.ok(source.includes("ecad/layout-check?projectDir="), "要打布局体检接口");
+  assert.ok(source.includes("\"布局体检\""), "面板要有「布局体检」");
+  assert.ok(source.includes("stm32_pcb_layout"), "超出时要指向工具");
+  assert.ok(source.indexOf("function useLayoutCheck(") < source.indexOf("function EcadPanel("), "hook 要定义在面板之前");
+});

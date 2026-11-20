@@ -119,8 +119,8 @@ test("handleWebApi：GET /config 返回快照，方法不对 405", async () => {
 
 
 test("WEB_API_PATHS：三十四条路由都在前缀下，且没有重复", () => {
-  assert.equal(WEB_API_PATHS.length, 35);
-  assert.equal(new Set(WEB_API_PATHS).size, 35);
+  assert.equal(WEB_API_PATHS.length, 36);
+  assert.equal(new Set(WEB_API_PATHS).size, 36);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/power"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/brief"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/mech"), true);
@@ -689,7 +689,7 @@ test("registerWebRoutes：host 的 dispatch 表里真的有板图路由（S151 �
   assert.equal(registered.includes(WEB_API_PREFIX + "/schematic/sync"), true, "少了这条，补封装只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/render3d"), true, "少了这条，3D 预览只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/swap"), true, "少了这条，换封装只会看到 404");
-  assert.equal(registered.length, 35);
+  assert.equal(registered.length, 36);
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad"), true);
 });
 
@@ -974,6 +974,7 @@ test("GET /ecad/parts：命中缓存时不联网，空关键词 400（S163）", 
 
 test("GET /ecad/links：差分对、平面层与去耦距离都在报告里，缺工程时 400（S165）", async () => {
   assert.ok(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/links"));
+  assert.ok(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/layout-check"));
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-links-"));
   const kicad = path.join(root, "hardware", "circuit", "dist", "board", "kicad");
   fs.mkdirSync(kicad, { recursive: true });
@@ -1008,6 +1009,54 @@ test("GET /ecad/links：差分对、平面层与去耦距离都在报告里，�
   assert.equal(view.decaps[0].ref, "C1");
   const bad = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/links", query: {}, deps });
   assert.equal(bad.status, 400);
+});
+
+test("GET /ecad/layout-check：去耦离电源脚远、晶振离主控远都要点名，缺 projectDir 时 400（S203）", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dsh-layout-"));
+  try {
+    const kicad = path.join(root, "hardware", "circuit", "dist", "board", "kicad");
+    fs.mkdirSync(kicad, { recursive: true });
+    const pads = [];
+    for (let index = 1; index <= 8; index += 1) {
+      const net = index === 1 ? "V3V3" : "GND";
+      pads.push('    (pad "' + String(index) + '" smd rect (at ' + String(index) + ' 0) (layers "F.Cu") (net "' + net + '"))');
+    }
+    fs.writeFileSync(path.join(kicad, "board.kicad_pcb"), [
+      "(kicad_pcb (version 20241229)",
+      '  (layers "F.Cu" "B.Cu")',
+      '  (gr_line (start 0 0) (end 60 0) (width 0.1) (layer "Edge.Cuts"))',
+      '  (gr_line (start 60 0) (end 60 40) (width 0.1) (layer "Edge.Cuts"))',
+      '  (gr_line (start 60 40) (end 0 40) (width 0.1) (layer "Edge.Cuts"))',
+      '  (gr_line (start 0 40) (end 0 0) (width 0.1) (layer "Edge.Cuts"))',
+      '  (footprint "x:u1" (layer "F.Cu") (at 10 10) (property "Reference" "U1") (property "Value" "MCU")',
+      ...pads,
+      "  )",
+      '  (footprint "x:c1" (layer "F.Cu") (at 30 10) (property "Reference" "C1") (property "Value" "100nF")',
+      '    (pad "1" smd rect (at 0 0) (layers "F.Cu") (net "V3V3"))',
+      '    (pad "2" smd rect (at 1 0) (layers "F.Cu") (net "GND")))',
+      '  (footprint "x:y1" (layer "F.Cu") (at 45 30) (property "Reference" "Y1") (property "Value" "8MHz")',
+      '    (pad "1" smd rect (at 0 0) (layers "F.Cu") (net "XTAL_IN"))',
+      '    (pad "2" smd rect (at 1 0) (layers "F.Cu") (net "XTAL_OUT")))',
+      '  (footprint "x:j1" (layer "F.Cu") (at 30 20) (property "Reference" "J1") (property "Value" "USB")',
+      '    (pad "1" smd rect (at 0 0) (layers "F.Cu") (net "GND")))',
+      "  )",
+      "",
+    ].join("\n"), "utf8");
+    const deps = { subprocess: fakeSubprocess, env: process.env };
+    const got = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/layout-check", query: { projectDir: root }, deps });
+    assert.equal(got.status, 200);
+    const view = got.body.layoutCheck;
+    assert.equal(view.ok, true, view.error);
+    assert.equal(view.mcu, "U1");
+    const ids = view.findings.map((item) => item.id);
+    assert.ok(ids.includes("layout.decap-far"), "去耦电容离电源脚远要点名：" + ids.join(","));
+    assert.ok(ids.includes("layout.crystal-far"), "晶振离主控远要点名：" + ids.join(","));
+    assert.ok(ids.includes("layout.connector-inside"), "接口没贴边要给提示：" + ids.join(","));
+    const bad = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/layout-check", query: {}, deps });
+    assert.equal(bad.status, 400);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("GET /ecad/render3d：没有 KiCad 工具链就直说，缺 projectDir 时 400（S180）", async () => {

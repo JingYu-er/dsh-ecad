@@ -15,6 +15,7 @@ import { buildSymbol } from "../lib/engine/ecad/gen/symbol.js";
 import { applySchEdits, pinPoint, replaySchEditsTo } from "../lib/engine/schematic/edit.js";
 import { parseSchText } from "../lib/engine/schematic/kicad-sch.js";
 import { analyzeLinks } from "../lib/engine/ecad/pcb/links.js";
+import { analyzeLayout } from "../lib/engine/ecad/pcb/layout-check.js";
 import { readGerberSet } from "../lib/engine/ecad/pcb/gerber.js";
 import { absorbFromKicad, diffImport, readImportState, renderCircuitSource } from "../lib/engine/ecad/import.js";
 import { fetchEasyedaPackage, easyedaToKicadMod, parseEasyedaPackage } from "../lib/engine/ecad/easyeda.js";
@@ -2834,4 +2835,36 @@ test("环境变量：新名优先，旧名（DSH_STM32_*）仍认（S192）", as
   assert.equal(envValue({ DSH_STM32_HOME: "D:/old" }, "HOME"), "D:/old", "旧名要能继续用");
   assert.equal(envValue({ DSH_ECAD_HOME: "D:/a", DSH_STM32_HOME: "D:/old" }, "HOME"), "D:/a", "新名优先");
   assert.equal(envValue({}, "HOME"), undefined);
+});
+
+test("布局体检：数字网络名也能认出电源/地，去耦离得远按距离分档（S203）", () => {
+  const board = [
+    "(kicad_pcb (version 20241229)",
+    '  (layers "F.Cu" "B.Cu")',
+    '  (net 1 "GND")',
+    '  (net 2 "/MCU/DVDD_3.3V")',
+    '  (gr_line (start 0 0) (end 50 0) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 50 0) (end 50 30) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 50 30) (end 0 30) (width 0.1) (layer "Edge.Cuts"))',
+    '  (gr_line (start 0 30) (end 0 0) (width 0.1) (layer "Edge.Cuts"))',
+    '  (footprint "x:u1" (layer "F.Cu") (at 10 10) (property "Reference" "U1")',
+    '    (pad "1" smd rect (at 0 0) (layers "F.Cu") (net 2))',
+    '    (pad "2" smd rect (at 1 0) (layers "F.Cu") (net 1)))',
+    '  (footprint "x:c1" (layer "F.Cu") (at 40 10) (property "Reference" "C1") (property "Value" "100nF")',
+    '    (pad "1" smd rect (at 0 0) (layers "F.Cu") (net 2))',
+    '    (pad "2" smd rect (at 1 0) (layers "F.Cu") (net 1)))',
+    "  )",
+    "",
+  ].join("\n");
+  const report = analyzeLayout(board, "board.kicad_pcb");
+  assert.equal(report.ok, true, report.error);
+  assert.equal(report.widthMm, 50);
+  assert.equal(report.mcu, "");
+  const far = report.findings.find((finding) => finding.id === "layout.decap-far");
+  assert.ok(far !== undefined, "30 mm 外的去耦电容要点名：" + JSON.stringify(report.findings));
+  assert.equal(far.severity, "error");
+  assert.match(far.message, /DVDD_3\.3V/u);
+  const missing = analyzeLayout("(kicad_pcb (version 20241229) (layers \"F.Cu\"))", "board.kicad_pcb");
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /没有带网络的封装/u);
 });
