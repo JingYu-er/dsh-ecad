@@ -1516,9 +1516,13 @@ export async function handleWebApi(input: {
       result.missing.length > 0 && located.toolchain.footprintDir !== ""
         ? suggestModelFixes(readFileSync(latest.pcbFile, "utf8"), latest.pcbFile, { model3dDir: located.toolchain.model3dDir, footprintDir: located.toolchain.footprintDir })
         : [];
+    // 面板只问「哪些器件没有 3D 模型」时不必把 PNG 塞进 JSON（一张 190 KB 的 base64）。
+    const wantsImage = query["image"] !== "0";
     let dataUrl = "";
     const notes = [...result.notes];
-    if (result.ok && result.bytes > 0 && result.bytes <= 1_500_000) {
+    if (!wantsImage) {
+      notes.push("没有内嵌图片（image=0）：3D 实体视图在客户端用 three 渲染。");
+    } else if (result.ok && result.bytes > 0 && result.bytes <= 1_500_000) {
       dataUrl = "data:image/png;base64," + readFileSync(result.file).toString("base64");
     } else if (result.ok && result.bytes > 1_500_000) {
       notes.push("图片 " + String(Math.round(result.bytes / 1024)) + " KB，超过 1.5 MB 没有内嵌；直接打开文件看。");

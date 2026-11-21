@@ -370,13 +370,17 @@ test("原理图页签不放编辑区：改图在 KiCad 里做，再按需导入�
   assert.equal(source.includes("\"连起来\""), false, "引脚连线按钮已撤掉");
 });
 
-test("电路设计页能看 3D 预览：顶/底/斜视三档，缺模型要点名（S180）", () => {
+test("3D 模型缺口要点名，PNG 预览整块已删（S180/S215）", () => {
   const clientSource = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(clientSource.includes("function useRender3d("), "要有 useRender3d");
   assert.ok(clientSource.includes("ecad/render3d?"), "请求要走 ecad/render3d");
-  assert.ok(clientSource.includes('"3D 预览"'), "要有 3D 预览区块");
-  assert.ok(clientSource.includes('"斜视"'), "要有等轴视图入口");
+  assert.ok(clientSource.includes("image=0"), "只问缺口时不要让服务端内嵌 PNG");
   assert.ok(clientSource.includes("缺 3D 模型"), "缺模型要列出来");
+  // S215：three 的 3D 实体视图已经取代了这张 PNG，四档视图按钮与图片不该再回来。
+  // 注释里提到旧块的名字没关系，这里断言的是「按钮/标题不再渲染出来」。
+  assert.equal(clientSource.includes('"3D 预览"),'), false, "3D 预览区块要删掉");
+  assert.equal(clientSource.includes('"斜视"),'), false, "斜视按钮要删掉");
+  assert.equal(clientSource.includes('"重新渲染"),'), false, "重新渲染按钮要删掉");
   assert.ok(clientSource.indexOf("function useRender3d(") < clientSource.indexOf("function EcadPanel("), "hook 要定义在 EcadPanel 之前");
 });
 
@@ -387,13 +391,14 @@ test("3D 缺模型时面板给可换的官方封装（S181）", () => {
   assert.ok(clientSource.includes("有 STEP"), "候选要标明有没有 STEP");
 });
 
-test("3D 预览里能一键换封装、能导出 GLB 与 STEP（S182/S183）", () => {
+test("3D 模型缺口里能一键换封装、能导出 STEP（S182/S183/S215）", () => {
   const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(source.includes("ecad/swap?projectDir="), "换封装要走 /ecad/swap");
   assert.ok(source.includes("换过去"), "缺模型的候选旁边要有换过去的按钮");
   assert.ok(source.includes("ecad/render3d?projectDir="), "导出复用 3D 路由");
   assert.ok(source.includes("format="), "导出要带 format");
-  assert.ok(source.includes("导出 GLB"), "面板要有 GLB 按钮");
+  // S215：GLB 由 3D 实体视图内部导出并缓存，面板上只留 STEP（给机械）。
+  assert.equal(source.includes('doExport3d("glb")'), false, "面板不再导 GLB");
   assert.ok(source.includes("导出 STEP"), "面板要有 STEP 按钮");
   assert.ok(source.includes("已导出 "), "导出完要显示文件与大小");
 });
