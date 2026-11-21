@@ -99,7 +99,7 @@ function realSubprocess() {
 }
 
 function parseArgs(argv) {
-  const options = { projectDir: "", layers: 0, clearance: 0, width: 0, keep: false, strict: false, strip: false, out: "" };
+  const options = { projectDir: "", layers: 0, clearance: 0, width: 0, keep: false, strict: false, strip: false, neckdown: 0.8, out: "" };
   const rest = [];
   for (let index = 0; index < argv.length; index += 1) {
     const item = argv[index];
@@ -110,6 +110,7 @@ function parseArgs(argv) {
     else if (item === "--out") options.out = String(argv[++index]);
     else if (item === "--strict") options.strict = true;
     else if (item === "--strip") options.strip = true;
+    else if (item === "--neckdown") options.neckdown = Number(argv[++index]);
     else rest.push(item);
   }
   options.projectDir = rest[0] ?? "";
@@ -333,7 +334,7 @@ async function main() {
       viaDrillMm: spec.viaDrillMm,
       layers: signalLayersFor(layers, planeLayers),
       maxRipup: 5,
-      neckdownMm: 0.8,
+      neckdownMm: options.neckdown,
       strictSizes: options.strict,
     },
   });
