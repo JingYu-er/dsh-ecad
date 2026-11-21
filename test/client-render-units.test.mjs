@@ -241,7 +241,7 @@ test("硬件台：每个页签、每个开关都点得下去，不会把面板�
 
     // 电路设计里的开关与动作按钮：板图视图切换、层开关、刷新、连接 KiCad。
     await runtime.click(view.component, props, (text) => text.trim() === "电路设计");
-    for (const label of ["2D 板图", "3D 草图", "刷新", "连接 KiCad", "顶层", "位号"]) {
+    for (const label of ["2D 板图", "3D 实体", "刷新", "连接 KiCad", "顶层", "位号"]) {
       const result = await runtime.click(view.component, props, (text) => text.trim() === label || text.includes(label));
       if (result.clicked) {
         assert.ok(runtime.textOf(result.tree).length > 0, "点 " + label + " 之后面板不能是空的");

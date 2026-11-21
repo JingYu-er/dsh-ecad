@@ -212,6 +212,10 @@ export interface Export3dOptions {
   readonly includeTracks?: boolean;
   readonly includePads?: boolean;
   readonly includeSilkscreen?: boolean;
+  readonly includeZones?: boolean;
+  readonly includeSoldermask?: boolean;
+  /** 网格化简距离（mm）：小于它的细节不导出，文件能小一半。 */
+  readonly minDistanceMm?: number;
 }
 
 export interface Export3dResult {
@@ -246,6 +250,11 @@ export function export3dArgv(deps: Render3dDeps, boardFile: string, options: Exp
   if (options.includeTracks === true) argv.push("--include-tracks");
   if (options.includePads === true) argv.push("--include-pads");
   if (options.includeSilkscreen === true) argv.push("--include-silkscreen");
+  if (options.includeZones === true) argv.push("--include-zones");
+  if (options.includeSoldermask === true) argv.push("--include-soldermask");
+  if (typeof options.minDistanceMm === "number" && Number.isFinite(options.minDistanceMm) && options.minDistanceMm > 0) {
+    argv.push("--min-distance", String(options.minDistanceMm));
+  }
   argv.push(boardFile);
   return argv;
 }

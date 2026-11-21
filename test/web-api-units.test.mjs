@@ -706,7 +706,10 @@ test("registerWebRoutes：host 的 dispatch 表里真的有板图路由（S151 �
   assert.equal(registered.includes(WEB_API_PREFIX + "/schematic/sync"), true, "少了这条，补封装只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/render3d"), true, "少了这条，3D 预览只会看到 404");
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/swap"), true, "少了这条，换封装只会看到 404");
-  assert.equal(registered.length, 36);
+  assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/glb"), true, "少了这条，3D 实体拿不到 GLB");
+  assert.equal(registered.includes(WEB_API_PREFIX + "/viewer.js"), true, "少了这条，three 视图脚本拿不到");
+  // JSON 路由 36 条 + 二进制路由 2 条（GLB 与 viewer.js）。
+  assert.equal(registered.length, 38);
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad"), true);
 });
 

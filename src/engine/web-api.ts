@@ -76,6 +76,7 @@ import { readLinks } from "./ecad/pcb/links.js";
 import { editStorePath, readSchEdits, replaySchEditsTo, writeSchEdits } from "./schematic/edit.js";
 import { readGerberSet } from "./ecad/pcb/gerber.js";
 import { EMPTY_RENDER3D, renderBoard3d } from "./ecad/pcb/render3d.js";
+import { exportViewerGlb, VIEWER_GLB_OPTIONS } from "./ecad/pcb/glb.js";
 import { suggestModelFixes } from "./ecad/pcb/model-fix.js";
 import { EMPTY_SWAP, runSwap } from "./ecad/pcb/swap.js";
 import { EMPTY_EXPORT3D, exportBoard3d } from "./ecad/pcb/render3d.js";
@@ -2180,6 +2181,101 @@ export async function handleWebApi(input: {
 }
 
 
+
+/* ------------------------------ 二进制资源 ------------------------------ */
+
+/**
+ * 3D 实体视图要用 GLB 与 three 的构建产物，两者都是二进制/大文件，不走 JSON 分发。
+ *
+ * `/ecad/glb` 每次请求都可能触发导出（3 秒、6–7 MB），所以导出结果按「板子 mtime + 大小」
+ * 缓存在 `~/.dsh-ecad/glb-cache`；`/viewer.js` 只是把 `lib/viewer.bundle.js` 原样吐出去。
+ */
+export const BOARD_GLB_PATH = WEB_API_PREFIX + "/ecad/glb";
+export const VIEWER_BUNDLE_PATH = WEB_API_PREFIX + "/viewer.js";
+
+/** 二进制路由清单：web-routes 单独注册，不走 handleWebApi。 */
+export const BINARY_PATHS: readonly string[] = [BOARD_GLB_PATH, VIEWER_BUNDLE_PATH];
+
+export function viewerBundleFile(): string {
+  return fileURLToPath(new URL("../viewer.bundle.js", import.meta.url));
+}
+
+function sendBytes(response: any, status: number, type: string, bytes: Buffer, cache: string): void {
+  if (typeof response.writeHead === "function") {
+    response.writeHead(status, { "content-type": type, "content-length": bytes.length, "cache-control": cache });
+  }
+  if (typeof response.end === "function") response.end(bytes);
+}
+
+function sendJsonError(response: any, status: number, message: string): void {
+  const text = JSON.stringify({ ok: false, error: message });
+  if (typeof response.writeHead === "function") {
+    response.writeHead(status, { "content-type": "application/json; charset=utf-8", "content-length": Buffer.byteLength(text), "cache-control": "no-store" });
+  }
+  if (typeof response.end === "function") response.end(text);
+}
+
+/** three 视图的构建产物。找不到就明确说「先 npm run build」，而不是给 404 空白。 */
+export function serveViewerBundle(response: any): void {
+  const file = viewerBundleFile();
+  if (!existsSync(file)) {
+    sendJsonError(response, 503, "还没有 3D 视图的构建产物：" + file + "。先跑 npm run build（含 build-viewer）。");
+    return;
+  }
+  sendBytes(response, 200, "text/javascript; charset=utf-8", readFileSync(file), "no-cache");
+}
+
+/** 板子的 GLB。按需导出并缓存；失败时回 JSON，面板据此退回 2D 草图。 */
+export async function serveBoardGlb(
+  input: { query: Record<string, string>; deps: WebApiDeps },
+  response: any,
+): Promise<void> {
+  const explicit = typeof input.query["projectDir"] === "string" ? input.query["projectDir"].trim() : "";
+  const session = typeof input.query["session"] === "string" ? input.query["session"].trim() : "";
+  // 与 handleWebApi 同一套兜底顺序（S91）：显式 → 本会话工作目录 → 空。
+  let projectDir = explicit;
+  if (projectDir === "" && session !== "" && sessionWorkspaceResolver !== null) {
+    try {
+      projectDir = (await sessionWorkspaceResolver(session)).trim();
+    } catch {
+      projectDir = "";
+    }
+  }
+  if (projectDir === "") {
+    sendJsonError(response, 400, PROJECT_DIR_REQUIRED);
+    return;
+  }
+  const located = locateEcadToolchain(envOf(input.deps));
+  if (!located.ok || located.toolchain === null) {
+    sendJsonError(response, 503, "找不到 KiCad 工具链：" + located.error);
+    return;
+  }
+  const latest = findLatestKicadBuild(planEcadWorkspace(projectDir, resolveProjectLayout(projectDir).hardwareDir));
+  if (latest === null || latest.pcbFile === "") {
+    sendJsonError(response, 404, "还没有可用的 .kicad_pcb：先跑一次 stm32_ecad_build，或在 KiCad 里存一次板子");
+    return;
+  }
+  const force = input.query["force"] === "1";
+  const exported = await exportViewerGlb(
+    {
+      kicadCli: located.toolchain.kicadCli,
+      model3dDir: located.toolchain.model3dDir,
+      env: located.toolchain.env,
+      processEnv: envOf(input.deps),
+      run: async (argv, timeoutMs) => {
+        const outcome = await runCapture(input.deps.subprocess, { argv: [...argv], cwd: dirname(latest.pcbFile), timeoutMs });
+        return { exitCode: outcome.exitCode ?? 1, stdout: outcome.stdout, stderr: outcome.stderr };
+      },
+    },
+    latest.pcbFile,
+    { ...VIEWER_GLB_OPTIONS, force },
+  );
+  if (!exported.ok) {
+    sendJsonError(response, 500, exported.error);
+    return;
+  }
+  sendBytes(response, 200, "model/gltf-binary", readFileSync(exported.file), exported.cached ? "max-age=60" : "no-cache");
+}
 
 /* ------------------------------ 事件流 ------------------------------ */
 

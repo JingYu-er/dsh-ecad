@@ -2195,6 +2195,118 @@ function Pcb3D(props) {
 }
 
 // 板图（S151）：只读 .kicad_pcb 出 SVG，按层取图；切换层或点刷新才重新请求。
+/*
+ * 3D 实体视图（S214）：three.js + KiCad 导出的 GLB。
+ *
+ * 为什么要另起一个脚本：three 与它的 addons 打成 IIFE 后 570 KB 左右，主面板每次打开都
+ * 背它不划算；这里按需 <script> 加载 `/dsh-ecad/api/viewer.js`，加载失败或没有 WebGL 时
+ * 退回上面的 canvas 草图（Pcb3D）。两条路都能用，观感差在「像不像 KiCad 渲染」。
+ */
+let viewerPromise = null;
+
+function loadViewer() {
+  if (typeof window !== "undefined" && window.EcadViewer) return Promise.resolve(window.EcadViewer);
+  if (viewerPromise !== null) return viewerPromise;
+  viewerPromise = new Promise((resolve, reject) => {
+    if (typeof document === "undefined" || typeof document.createElement !== "function" || !document.head) {
+      reject(new Error("当前环境没有 document：3D 实体视图只在浏览器里可用"));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = apiUrl("viewer.js");
+    script.async = true;
+    script.onload = () => {
+      if (window.EcadViewer) resolve(window.EcadViewer);
+      else reject(new Error("3D 视图脚本已加载，但没有导出 EcadViewer"));
+    };
+    script.onerror = () => reject(new Error("3D 视图脚本加载失败（先跑 npm run build 生成 lib/viewer.bundle.js）"));
+    document.head.appendChild(script);
+  });
+  return viewerPromise;
+}
+
+function glbUrl(projectDir, sessionId, force) {
+  const parts = ["projectDir=" + encodeURIComponent(projectDir === undefined || projectDir === null ? "" : projectDir)];
+  if (typeof sessionId === "string" && sessionId !== "") parts.push("session=" + encodeURIComponent(sessionId));
+  if (force === true) parts.push("v=" + String(Date.now()));
+  return apiUrl("ecad/glb?" + parts.join("&"));
+}
+
+function Board3D(props) {
+  const canvasRef = useRef(null);
+  const handleRef = useRef(null);
+  const [mode, setMode] = useState("loading");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setMode("loading");
+    setError("");
+    loadViewer()
+      .then((api) => {
+        if (cancelled) return;
+        if (typeof api.canRender !== "function" || !api.canRender()) {
+          setMode("sketch");
+          return;
+        }
+        const handle = api.mountBoard(canvasRef.current, {
+          url: glbUrl(props.projectDir, props.sessionId, props.force),
+          boxes: props.boxes || [],
+          focus: props.focus,
+          board: props.board,
+          onError: (failure) => {
+            if (cancelled) return;
+            setError(describeError(failure));
+            setMode("sketch");
+          },
+        });
+        handleRef.current = handle;
+        setMode("three");
+      })
+      .catch((failure) => {
+        if (cancelled) return;
+        setError(describeError(failure));
+        setMode("sketch");
+      });
+    return () => {
+      cancelled = true;
+      const handle = handleRef.current;
+      if (handle !== null && handle !== undefined) {
+        handle.dispose();
+        handleRef.current = null;
+      }
+    };
+  }, [props.projectDir, props.sessionId, props.force]);
+
+  useEffect(() => {
+    const handle = handleRef.current;
+    if (handle !== null && handle !== undefined && mode === "three") handle.setFocus(props.focus);
+  }, [props.focus, mode]);
+
+  if (mode === "sketch") {
+    // 没有 three / 没有 GLB / 没有 WebGL：退回包围盒草图，并把原因说清楚。
+    return e(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+      error === ""
+        ? null
+        : e("div", { style: { fontSize: "11.5px", opacity: 0.7 } }, "退回包围盒草图：" + error),
+      e(Pcb3D, { board: props.board, boxes: props.boxes || [], focus: props.focus }),
+    );
+  }
+
+  return e(
+    "div",
+    { style: { position: "relative", width: "100%", height: "440px" } },
+    e("canvas", {
+      ref: canvasRef,
+      style: { width: "100%", height: "100%", display: "block", cursor: "grab", touchAction: "none" },
+    }),
+    mode === "loading" ? e("div", { style: { position: "absolute", inset: "0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", opacity: 0.7 } }, "载入 3D 实体…") : null,
+    e("div", { style: { position: "absolute", left: "8px", bottom: "6px", fontSize: "11px", opacity: 0.65 } }, "3D 实体 · 拖动旋转，滚轮缩放，右键平移"),
+  );
+}
+
 function usePcbView(projectDir, show, focus) {
   const [view, setView] = useState(null);
   const [error, setError] = useState("");
@@ -2264,6 +2376,7 @@ function EcadPanel(props) {
       const state = useEcad(projectDir, 20000);
       const [pcbShow, setPcbShow] = useState({ top: true, bottom: true, pads: true, vias: true, silk: true, edge: true, refs: false });
       const [pcbMode, setPcbMode] = useState(loadPref("dsh-ecad-pcb-mode", "2d"));
+      const [pcb3dReload, setPcb3dReload] = useState(0);
       // 高亮位号：点布局发现/BOM 行/未连接行时设置，板图与 3D 共用（S210）。
       const [pcbFocus, setPcbFocus] = useState("");
       const pcb = usePcbView(projectDir, pcbShow, pcbFocus);
@@ -2507,10 +2620,13 @@ function EcadPanel(props) {
                   background: pcbMode === mode ? "var(--dsw-alias-interactive-bg-active)" : undefined,
                 }),
               },
-              mode === "3d" ? "3D 草图" : "2D 板图",
+              mode === "3d" ? "3D 实体" : "2D 板图",
             ),
           ),
           e("button", { key: "pcb-refresh", type: "button", onClick: () => pcb.reload(), style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px" }) }, "刷新"),
+          pcbMode === "3d"
+            ? e("button", { key: "pcb-3d-reload", type: "button", onClick: () => setPcb3dReload((value) => value + 1), style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px" }) }, "重导 3D")
+            : null,
           e("button", { key: "pcb-ipc", type: "button", onClick: checkIpc, style: Object.assign({}, debugStyles.button, { padding: "1px 8px", fontSize: "12px" }) }, "连接 KiCad"),
           ipc === null
             ? null
@@ -2532,7 +2648,15 @@ function EcadPanel(props) {
                 ? e(
                     "div",
                     { key: "pcb-3d", className: "d32-pcb-figure", style: { border: D32_HAIR, background: "var(--dsw-alias-bg-layer-2)", padding: "6px" } },
-                    e(Pcb3D, { key: "pcb3d-canvas", board: pcbView.board3d, boxes: pcbView.boxes || [], focus: pcbFocus }),
+                    e(Board3D, {
+                      key: "pcb3d-three",
+                      board: pcbView.board3d,
+                      boxes: pcbView.boxes || [],
+                      focus: pcbFocus,
+                      projectDir,
+                      sessionId: props.sessionId,
+                      force: pcb3dReload,
+                    }),
                   )
               : pcbMode === "3d"
                 ? e("div", { key: "pcb-3d-missing", style: { fontSize: "12px", opacity: 0.7 } }, "这张回包里没有 3D 骨架：刷新一次板图，或重启 DSH 载入新版本。")

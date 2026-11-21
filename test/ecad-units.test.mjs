@@ -2980,3 +2980,23 @@ test("布局体检：数字网络名也能认出电源/地，去耦离得远按�
   assert.equal(missing.ok, false);
   assert.match(missing.error, /没有带网络的封装/u);
 });
+
+test("3D 实体：GLB 缓存键跟着板子与参数走，参数不同就不复用（S214）", async () => {
+  const { glbCacheKey, glbCachePath, VIEWER_GLB_OPTIONS } = await import("../lib/engine/ecad/pcb/glb.js");
+  const dir = mkdtempSync(join(tmpdir(), "dsh-glb-"));
+  try {
+    const board = join(dir, "board.kicad_pcb");
+    writeFileSync(board, "(kicad_pcb (version 20241229))");
+    const base = glbCacheKey(board, VIEWER_GLB_OPTIONS);
+    assert.equal(base.length, 16, "缓存键是 16 位哈希");
+    assert.equal(glbCacheKey(board, VIEWER_GLB_OPTIONS), base, "同一块板同一套参数要稳定");
+    assert.notEqual(glbCacheKey(board, { ...VIEWER_GLB_OPTIONS, minDistanceMm: 0.2 }), base, "导出参数变了要换键");
+    // 板子内容变了（mtime/size）也要换键：否则面板会拿旧几何当新板子。
+    writeFileSync(board, "(kicad_pcb (version 20241229) (generator pcbnew))");
+    assert.notEqual(glbCacheKey(board, VIEWER_GLB_OPTIONS), base, "板子改过不能复用旧 GLB");
+    const cache = glbCachePath({ DSH_ECAD_HOME: dir }, base);
+    assert.ok(cache.includes(join("glb-cache", base + ".glb")), "缓存落在 <home>/glb-cache/<键>.glb：" + cache);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

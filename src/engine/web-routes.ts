@@ -9,9 +9,14 @@
  */
 
 import {
+  BINARY_PATHS,
+  BOARD_GLB_PATH,
   EVENT_STREAM_PATH,
   handleWebApi,
   openEventStream,
+  serveBoardGlb,
+  serveViewerBundle,
+  VIEWER_BUNDLE_PATH,
   WEB_API_PATHS,
   type WebApiDeps,
 } from "./web-api.js";
@@ -79,6 +84,30 @@ export function registerWebRoutes(ctx: DshContext): void {
     if (server === undefined || server === null || typeof server.register !== "function") return;
     if (subprocess === undefined || subprocess === null) return;
     const deps: WebApiDeps = { subprocess };
+    for (const path of BINARY_PATHS) {
+      // 二进制：GLB 与 three 的构建产物，直接写原始 response（体积大、Content-Type 不同）。
+      server.register({
+        kind: "exact",
+        path,
+        handler: async (request: any, response: any) => {
+          const url = parseUrl(request?.url);
+          try {
+            if (path === VIEWER_BUNDLE_PATH) {
+              serveViewerBundle(response);
+              return;
+            }
+            if (path === BOARD_GLB_PATH) {
+              await serveBoardGlb({ query: url.query, deps }, response);
+              return;
+            }
+            send(response, 404, { ok: false, error: "未知的二进制接口：" + path });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            send(response, 500, { ok: false, error: "二进制接口异常：" + message });
+          }
+        },
+      });
+    }
     for (const path of WEB_API_PATHS) {
       if (path === EVENT_STREAM_PATH) {
         // 事件流是长连接，直接写原始 response；响应头与心跳都在 openEventStream 里。
