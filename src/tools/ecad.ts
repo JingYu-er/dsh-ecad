@@ -109,6 +109,16 @@ function formatReport(name: string, report: KicadReport): string[] {
     lines.push("  [" + finding.severity + "] " + finding.rule + " " + finding.message + items);
   }
   if (report.summary.findings.length > 12) lines.push("  …还有 " + String(report.summary.findings.length - 12) + " 条");
+  // 未连接单独列：网络 + 两端位号与坐标，照着补就行（S210）。
+  const missing = report.summary.unconnected ?? [];
+  for (const item of missing.slice(0, 8)) {
+    const describe = (point: { text: string; ref: string; x: number | null; y: number | null }): string => {
+      const where = point.ref !== "" ? point.ref : point.text;
+      return point.x === null || point.y === null ? where : where + " @(" + point.x.toFixed(2) + ", " + point.y.toFixed(2) + ")";
+    };
+    lines.push("  未连接 [" + (item.net === "" ? "?" : item.net) + "] " + describe(item.from) + " → " + describe(item.to));
+  }
+  if (missing.length > 8) lines.push("  …还有 " + String(missing.length - 8) + " 条未连接");
   if (report.reportPath !== "") lines.push("  报告：" + report.reportPath);
   if (!report.ok && report.error !== "") lines.push("  命令输出：" + report.error.split(/\r?\n/u)[0]);
   return lines;

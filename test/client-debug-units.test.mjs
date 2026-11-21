@@ -80,7 +80,10 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
       effect: (callback) => callback(),
       slots: {
         inject: (name, callback) => {
-          assert.ok(name === "settings.section" || name === "conversation.view", name);
+          assert.ok(
+            name === "settings.section" || name === "conversation.view" || name === "conversation.session.header.actions" || name === "conversation.chat.turnTail",
+            name,
+          );
           return callback();
         },
         register: (definition, component) => {
@@ -90,7 +93,7 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
       },
     };
     exports.apply(ctx);
-    assert.equal(registered.length, 2);
+    assert.equal(registered.length, 4, "设置、硬件台、卡片观察器、卡片本体各一个槽位");
     const settings = registered.find((item) => item.definition.name === "settings.section");
     const debug = registered.find((item) => item.definition.name === "conversation.view");
     assert.ok(settings !== undefined, "设置面板槽位不能丢");
@@ -271,6 +274,20 @@ test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲
   assert.ok(source.includes("function Pcb3D("), source.length);
   assert.ok(source.includes("dsh-ecad-pcb-mode"));
   assert.ok(source.includes("e(Pcb3D, "));
+  // 点击定位（S210）：BOM 位号与布局发现的「定位」设同一个 pcbFocus，2D 与 3D 共用。
+  assert.ok(source.includes('const [pcbFocus, setPcbFocus] = useState("");'), "高亮要有一个共享状态");
+  assert.ok(source.includes("usePcbView(projectDir, pcbShow, pcbFocus)"), "板图请求要带上高亮位号");
+  assert.ok(source.includes("focus: pcbFocus"), "3D 视图也要吃同一个高亮");
+  assert.ok(source.includes("onClick: () => setPcbFocus(ref)"), "点 BOM 位号要能定位");
+  assert.ok(source.includes('"定位 " + ref'), "布局发现旁要有定位按钮");
+  assert.ok(source.includes("params.push(\"focus=\" + encodeURIComponent(focus))"), "高亮要以 focus 查询参数发给服务端");
+  // 回合尾巴卡片（S211）：chain 槽位 + 纯 select + 渲染 null 的观察器。
+  assert.ok(source.includes('ctx.slots.inject("conversation.chat.turnTail"'), "卡片要挂在 turnTail 槽位上");
+  assert.ok(source.includes("select: (owner) =>"), "chain 槽位要按回合号自我选举");
+  assert.ok(source.includes("function TailWatcher(props)"), "观察器只记状态、渲染 null");
+  assert.ok(source.includes("function TailCard(props)"), "卡片本体要存在");
+  assert.ok(source.includes('"conversation.session.header.actions"'), "观察器挂在会话头部槽位");
+  assert.ok(source.includes("stm32_ecad_design: \"一键设计\""), "卡片要认识硬件侧的长任务工具");
   assert.ok(source.includes("连接 KiCad"), "面板要能手动探一次 IPC 连接");
   assert.ok(source.includes('"ecad/ipc?open=1"'), "连不上时请求带 open=1，让插件自己把 KiCad 打开");
   assert.ok(source.includes("reply.value.ipc"), "callApi 已经把回包包进 value，读 ipc 必须先解包");

@@ -29,6 +29,8 @@ export interface PcbSvgOptions {
   readonly maxPx?: number;
   /** 是否画点阵背景（与原理图页保持一致）；默认 true。 */
   readonly grid?: boolean;
+  /** 要高亮的位号：该元件焊盘加描边，并套一个方框（S210）。 */
+  readonly focus?: string;
 }
 
 export interface PcbSvgResult {
@@ -173,19 +175,29 @@ export function renderPcbSvg(scene: PcbScene, options: PcbSvgOptions = {}): PcbS
   }
   if (tracks.length > 0) parts.push('<g class="d32-pcb-tracks">' + tracks.join("") + "</g>");
 
+  const focus = typeof options.focus === "string" ? options.focus.trim() : "";
+  const focusBox: { x0: number; y0: number; x1: number; y1: number } = { x0: Number.POSITIVE_INFINITY, y0: Number.POSITIVE_INFINITY, x1: Number.NEGATIVE_INFINITY, y1: Number.NEGATIVE_INFINITY };
   const pads: string[] = [];
   if (show.pads !== false) {
     for (const pad of scene.pads) {
       if (pad.side === "top" && show.top === false) continue;
       if (pad.side === "bottom" && show.bottom === false) continue;
       const color = fillFor(pad.side);
+      const hit = focus !== "" && pad.ref === focus;
+      if (hit) {
+        focusBox.x0 = Math.min(focusBox.x0, pad.x - pad.width / 2);
+        focusBox.y0 = Math.min(focusBox.y0, pad.y - pad.height / 2);
+        focusBox.x1 = Math.max(focusBox.x1, pad.x + pad.width / 2);
+        focusBox.y1 = Math.max(focusBox.y1, pad.y + pad.height / 2);
+      }
+      const stroke = hit ? ' stroke="var(--dsw-alias-state-warn-primary)" stroke-width="1.6"' : "";
       if (pad.shape === "circle") {
-        pads.push('<circle cx="' + n(toX(pad.x)) + '" cy="' + n(toY(pad.y)) + '" r="' + n((pad.width / 2) * pxPerMm) + '" fill="' + color + '" fill-opacity="0.62" />');
+        pads.push('<circle cx="' + n(toX(pad.x)) + '" cy="' + n(toY(pad.y)) + '" r="' + n((pad.width / 2) * pxPerMm) + '" fill="' + color + '" fill-opacity="0.62"' + stroke + " />");
         continue;
       }
       const points = padPoints(pad);
       if (points === null) continue;
-      pads.push('<polygon points="' + points.map((point) => n(toX(point.x)) + "," + n(toY(point.y))).join(" ") + '" fill="' + color + '" fill-opacity="0.62" />');
+      pads.push('<polygon points="' + points.map((point) => n(toX(point.x)) + "," + n(toY(point.y))).join(" ") + '" fill="' + color + '" fill-opacity="0.62"' + stroke + " />");
     }
   }
   if (pads.length > 0) parts.push('<g class="d32-pcb-pads">' + pads.join("") + "</g>");
@@ -224,6 +236,18 @@ export function renderPcbSvg(scene: PcbScene, options: PcbSvgOptions = {}): PcbS
       );
     }
     parts.push('<g class="d32-pcb-refs">' + labels.join("") + "</g>");
+  }
+
+  // 高亮方框最后画，压在其它元素上面（S210）。
+  if (Number.isFinite(focusBox.x0) && Number.isFinite(focusBox.y0)) {
+    const padPx = 3;
+    const x0 = toX(focusBox.x0) - padPx;
+    const y0 = toY(focusBox.y1) - padPx;
+    const w = (focusBox.x1 - focusBox.x0) * pxPerMm + padPx * 2;
+    const h = (focusBox.y1 - focusBox.y0) * pxPerMm + padPx * 2;
+    parts.push(
+      '<rect class="d32-pcb-focus" x="' + n(x0) + '" y="' + n(y0) + '" width="' + n(w) + '" height="' + n(h) + '" fill="none" stroke="var(--dsw-alias-state-warn-primary)" stroke-width="1.4" stroke-dasharray="5 3" rx="2" />',
+    );
   }
 
   parts.push("</svg>");

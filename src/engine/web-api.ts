@@ -1688,6 +1688,7 @@ export async function handleWebApi(input: {
       elements: 0,
       board3d: null as { x0: number; y0: number; x1: number; y1: number; thicknessMm: number } | null,
       boxes: [] as { ref: string; x0: number; y0: number; x1: number; y1: number; heightMm: number; side: string; estimated: boolean }[],
+      focus: "",
       notes: [] as string[],
     };
     if (board === "") return ok({ pcbView: emptyPcbView });
@@ -1695,7 +1696,9 @@ export async function handleWebApi(input: {
     if (!scene.ok) return ok({ pcbView: { ...emptyPcbView, error: scene.error } });
     // 查询参数按“关掉哪一层”读：默认全开，传 0 才隐藏；位号默认关（排布密集时压线）。
     const flagOf = (name: string): boolean => query[name] !== "0";
+    const focusRef = typeof query["focus"] === "string" ? query["focus"].trim() : "";
     const rendered = renderPcbSvg(scene, {
+      focus: focusRef,
       show: {
         top: flagOf("top"),
         bottom: flagOf("bottom"),
@@ -1713,6 +1716,7 @@ export async function handleWebApi(input: {
       pcbView: {
         board3d: boardBox3(scene, Number.isFinite(thickness) && thickness > 0 ? thickness : 1.6),
         boxes: componentBoxes(scene),
+        focus: focusRef,
         ok: rendered.ok,
         error: rendered.error,
         file: board,

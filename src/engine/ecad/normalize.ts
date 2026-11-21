@@ -158,6 +158,77 @@ export interface NormalizeOptions {
   readonly libsDir: string;
 }
 
+/** 取 `(footprint "lib:name" …)` 整块：按括号配平，返回文本与 lib:name。 */
+function footprintBlocks(pcbText: string): { libId: string; text: string; start: number }[] {
+  const blocks: { libId: string; text: string; start: number }[] = [];
+  const head = /\(footprint "([^"]+)"/gu;
+  for (let match = head.exec(pcbText); match !== null; match = head.exec(pcbText)) {
+    let depth = 0;
+    let end = -1;
+    for (let i = match.index; i < pcbText.length; i += 1) {
+      const ch = pcbText[i];
+      if (ch === "(") depth += 1;
+      else if (ch === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) continue;
+    blocks.push({ libId: match[1] ?? "", text: pcbText.slice(match.index, end), start: match.index });
+  }
+  return blocks;
+}
+
+/**
+ * 把板子里「机器自带、本机没有对应库」的封装落成工程库（S210）。
+ *
+ * tscircuit 导出的板子封装名是 `tscircuit:xxx`，本机没有这个库，DRC 就会对**每个**
+ * 这样的元件报一条 `lib_footprint_issues`——这不是几何问题，但会把真正的告警淹掉。
+ * 做法：把板子里那块封装原样写成 `.pretty/<name>.kicad_mod`，登记进 `fp-lib-table`；
+ * 写出来的就是板上那一份，所以「封装与库不一致」也不会报。
+ */
+export function materializeBoardLibraries(
+  pcbText: string,
+  kicadDir: string,
+  libsDir: string,
+): { text: string; libs: string[]; written: number } {
+  if (!existsSync(libsDir)) mkdirSync(libsDir, { recursive: true });
+  const known = new Set<string>();
+  for (const entry of readdirSync(libsDir).filter((name) => name.endsWith(".pretty"))) known.add(entry.slice(0, entry.length - ".pretty".length));
+  const lib = "tscircuit_local";
+  const target = join(libsDir, lib + ".pretty");
+  let text = pcbText;
+  let written = 0;
+  let touched = false;
+  // 从后往前改：替换会改变长度，倒着改前面的偏移才不乱。
+  const blocks = footprintBlocks(pcbText).reverse();
+  for (const block of blocks) {
+    const cut = block.libId.indexOf(":");
+    if (cut <= 0) continue;
+    const libName = block.libId.slice(0, cut);
+    const name = block.libId.slice(cut + 1);
+    const machine = libName === "tscircuit" || libName.startsWith("tscircuit_");
+    if (!machine || known.has(libName)) continue;
+    // 同名封装在板上可能有好几种几何（tscircuit 一律写 `chip`），库名按位号区分。
+    const refMatch = /Reference" "([^"]+)"/u.exec(block.text) ?? /\(fp_text reference "([^"]+)"/u.exec(block.text);
+    const ref = (refMatch?.[1] ?? name).replace(/[^A-Za-z0-9_]/gu, "_");
+    const localName = name + "_" + ref;
+    const body = block.text.replace(/^\(footprint "[^"]+"/u, '(footprint "' + localName + '"');
+    mkdirSync(target, { recursive: true });
+    writeFileSync(join(target, localName + ".kicad_mod"), body + "\n", "utf8");
+    written += 1;
+    text = text.slice(0, block.start) + block.text.replace(/^\(footprint "[^"]+"/u, '(footprint "' + lib + ":" + localName + '"') + text.slice(block.start + block.text.length);
+    touched = true;
+  }
+  if (!touched) return { text: pcbText, libs: [], written: 0 };
+  const table = join(kicadDir, "fp-lib-table");
+  upsertLibEntries(table, "fp", [{ lib, uri: "${KIPRJMOD}/" + relative(kicadDir, target).replace(/\\/gu, "/") }]);
+  return { text, libs: [lib], written };
+}
+
 /**
  * 归一化一个生成好的 KiCad 工程：改 `.kicad_pcb` 里的封装名，并把官方封装复制进工程库。
  *

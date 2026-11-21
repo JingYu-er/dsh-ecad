@@ -14,18 +14,41 @@ import { runCapture } from "../subprocess-runner.js";
 import { ecadEnv, type EcadToolchain } from "./toolchain.js";
 import { prepareModels3d } from "./models3d.js";
 
+/** 报告里一条边/一个焊盘的落点；有坐标才能在板图上定位。 */
+export interface FindingPoint {
+  readonly text: string;
+  /** 板面坐标（mm）。报告里没给坐标时为 null。 */
+  readonly x: number | null;
+  readonly y: number | null;
+  /** 从描述里认出来的位号（如「F.Cu 上 DS1 的焊盘 41」→ DS1），认不出为空。 */
+  readonly ref: string;
+  /** 方括号里的网络名（如「[GND]」），没有为空。 */
+  readonly net: string;
+}
+
 export interface KicadFinding {
   readonly rule: string;
   readonly severity: string;
   readonly message: string;
   /** 涉及的元件/网络描述，最多几项。 */
   readonly items: readonly string[];
+  /** 与 items 同序的落点信息；老报告没有坐标时为空数组。 */
+  readonly points?: readonly FindingPoint[];
+}
+
+/** 一条未连接：两端各有一个落点，能直接照着补。 */
+export interface UnconnectedItem {
+  readonly net: string;
+  readonly from: FindingPoint;
+  readonly to: FindingPoint;
 }
 
 export interface ReportSummary {
   readonly errors: number;
   readonly warnings: number;
   readonly findings: readonly KicadFinding[];
+  /** 未连接的明细（只 DRC 有）：网络名与两端落点。 */
+  readonly unconnected?: readonly UnconnectedItem[];
 }
 
 export interface KicadReport {
@@ -43,7 +66,7 @@ interface ErcViolation {
   type?: string;
   severity?: string;
   description?: string;
-  items?: { description?: string }[];
+  items?: { description?: string; pos?: { x?: number; y?: number } }[];
 }
 
 interface DrcReport {
@@ -56,28 +79,52 @@ interface ErcReport {
   sheets?: { violations?: ErcViolation[] }[];
 }
 
+/** 位号：描述里形如「F.Cu 上 DS1 的焊盘 41」「R12 的焊盘」；`net` 名不算位号。 */
+const REF_IN_DESCRIPTION = /(?:^|[\s上])?((?:U|R|C|L|D|Q|J|SW|Y|X|FB|TP|F|K|DS|BT|LED|IC)\d{1,4})(?=[\s的]|$)/u;
+const NET_IN_DESCRIPTION = /\[([^\]]+)\]/u;
+
+function pointOf(text: string, item: { pos?: { x?: number; y?: number } }): FindingPoint {
+  const refMatch = REF_IN_DESCRIPTION.exec(text);
+  const netMatch = NET_IN_DESCRIPTION.exec(text);
+  const x = typeof item.pos?.x === "number" ? item.pos.x : null;
+  const y = typeof item.pos?.y === "number" ? item.pos.y : null;
+  return { text, x, y, ref: refMatch === null ? "" : refMatch[1] ?? "", net: netMatch === null ? "" : netMatch[1] ?? "" };
+}
+
 function pushFindings(target: KicadFinding[], violation: ErcViolation, fallbackRule: string): void {
   const severity = (violation.severity ?? "error").toLowerCase();
-  const items = (violation.items ?? [])
-    .map((item) => item.description ?? "")
-    .filter((text) => text !== "")
-    .slice(0, 3);
+  const all = (violation.items ?? [])
+    .map((item) => ({ item, text: item.description ?? "" }))
+    .filter((entry) => entry.text !== "");
+  const items = all.map((entry) => entry.text).slice(0, 3);
+  const points = all.slice(0, 3).map((entry) => pointOf(entry.text, entry.item));
   target.push({
     rule: violation.type ?? fallbackRule,
     severity,
     message: violation.description ?? "",
     items,
+    points,
   });
 }
 
 function summarize(findings: readonly KicadFinding[]): ReportSummary {
   let errors = 0;
   let warnings = 0;
+  const unconnected: UnconnectedItem[] = [];
   for (const finding of findings) {
     if (finding.severity === "error") errors += 1;
     else warnings += 1;
+    if (finding.rule !== "unconnected_items" && finding.rule !== "unconnected") continue;
+    const points = finding.points ?? [];
+    if (points.length < 2) continue;
+    const [from, to] = [points[0]!, points[1]!];
+    unconnected.push({
+      net: from.net !== "" ? from.net : to.net,
+      from,
+      to,
+    });
   }
-  return { errors, warnings, findings };
+  return { errors, warnings, findings, unconnected };
 }
 
 function tail(text: string, limit = 1200): string {

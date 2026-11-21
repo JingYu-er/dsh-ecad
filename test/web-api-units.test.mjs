@@ -655,6 +655,15 @@ test("GET /ecad/pcb：给工程就出板图，层开关与缺板提示都对（S
   assert.equal(got.body.pcbView.boxes[0].estimated, true);
   assert.deepEqual(got.body.pcbView.board3d, { x0: 0, y0: 0, x1: 20, y1: 10, thicknessMm: 1.6 });
 
+  // 高亮（S210）：带 focus 就把该位号的焊盘描边 + 套方框；没命中就不画框。
+  const focused = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/pcb", query: { projectDir: root, focus: "R1" }, deps });
+  assert.equal(focused.body.pcbView.focus, "R1");
+  assert.match(focused.body.pcbView.svg, /d32-pcb-focus/u, "命中高亮要画方框");
+  assert.match(focused.body.pcbView.svg, /state-warn-primary/u, "命中焊盘要用强调色描边");
+  const notFocused = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/pcb", query: { projectDir: root, focus: "U9" }, deps });
+  assert.equal(notFocused.body.pcbView.focus, "U9");
+  assert.doesNotMatch(notFocused.body.pcbView.svg, /d32-pcb-focus/u, "没命中就不要画框");
+
   const hidden = await handleWebApi({ method: "GET", path: WEB_API_PREFIX + "/ecad/pcb", query: { projectDir: root, bottom: "0", refs: "0" }, deps });
   assert.equal(hidden.body.pcbView.ok, true);
   assert.doesNotMatch(hidden.body.pcbView.svg, /state-success-primary/u);

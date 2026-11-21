@@ -219,7 +219,14 @@ export async function runEcadDesign(request: DesignRequest): Promise<DesignResul
   started = Date.now();
   const drc = await runDrc(subprocess, toolchain, pcbFile, request.signal);
   notes.push(...drc.notes);
-  record("DRC", drc.ok, drc.ok ? String(drc.summary.errors) + " 错误 / " + String(drc.summary.warnings) + " 警告" : drc.error, started);
+  const missing = drc.summary.unconnected ?? [];
+  record(
+    "DRC",
+    drc.ok,
+    (drc.ok ? String(drc.summary.errors) + " 错误 / " + String(drc.summary.warnings) + " 警告" : drc.error) +
+      (missing.length === 0 ? "" : "（未连接 " + String(missing.length) + " 条：" + missing.slice(0, 3).map((item) => (item.net === "" ? "?" : item.net) + " " + (item.from.ref !== "" ? item.from.ref : item.from.text) + "→" + (item.to.ref !== "" ? item.to.ref : item.to.text)).join("、") + (missing.length > 3 ? " 等" : "") + "）"),
+    started,
+  );
 
   // 6. 可制造性与成本：判据是嘉立创常规工艺，只有提示，不阻断。
   started = Date.now();
