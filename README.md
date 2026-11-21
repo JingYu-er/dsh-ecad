@@ -1,7 +1,7 @@
 # dsh-ecad
 
 [![license](https://img.shields.io/github/license/JingYu-er/dsh-ecad)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.1.0-orange)](https://github.com/JingYu-er/dsh-ecad)
+[![version](https://img.shields.io/badge/version-0.1.1-orange)](https://github.com/JingYu-er/dsh-ecad)
 
 STM32 硬件侧的 DSH 插件：原理图、PCB、制造文件、成本与体检。与固件插件 `dsh-stm32` 分工，二者通过工程内的 `dsh/mcu.json` 交换事实，工具名不重叠，可同时安装。
 
@@ -36,7 +36,7 @@ dsh plugin --profile desktop add dsh-ecad
 
 安装后完全退出 DSH 再启动（插件层只在进程启动时加载）。
 
-- 校验：`dsh plugin --profile desktop why dsh-ecad` 显示 `0.1.0`
+- 校验：`dsh plugin --profile desktop why dsh-ecad` 显示 `0.1.1`
 - 卸载：`dsh plugin --profile desktop remove dsh-ecad`，随后重启 DSH
 
 外部依赖（缺哪个，对应工具会说明缺什么）：
