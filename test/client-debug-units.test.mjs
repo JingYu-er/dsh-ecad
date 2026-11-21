@@ -9,6 +9,13 @@ import { readFileSync } from "node:fs";
 /** 最小 React 桩：只实现 client/client.js 用到的 API。 */
 const React = {
   createElement: (type, props, ...children) => ({ type, props: props ?? {}, children }),
+  // 错误边界用了 Component（S212）：假 React 也得给一个能继承的基类。
+  Component: class {
+    constructor(props) {
+      this.props = props;
+      this.state = {};
+    }
+  },
   Fragment: "Fragment",
   useState: (initial) => [typeof initial === "function" ? initial() : initial, () => undefined],
   useEffect: () => undefined,
@@ -114,7 +121,13 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
       if (Array.isArray(node)) return node.map(renderText).join(" ");
       // 真 React 会把 children 塞进 props.children；桩把它留在 node.children，
       // 展开组件时补回去，否则面板正文（DebugPanel 的 props.children）会被吞掉。
-      if (typeof node.type === "function") return renderText(node.type(Object.assign({}, node.props, { children: node.children })));
+      if (typeof node.type === "function") {
+        const props = Object.assign({}, node.props, { children: node.children });
+        // 类组件（错误边界）要 new 出来再 render，直接调用会抛
+        // 「Class constructor cannot be invoked without 'new'」。
+        if (typeof node.type.prototype?.render === "function") return renderText(new node.type(props).render());
+        return renderText(node.type(props));
+      }
       return renderText(node.children);
     };
     const settingsText = renderText(React.createElement(settings.component));

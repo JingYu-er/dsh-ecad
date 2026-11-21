@@ -40,6 +40,7 @@ import { fileURLToPath } from "node:url";
 const suites = [
   "artifacts-units.test.mjs",
   "client-debug-units.test.mjs",
+  "client-render-units.test.mjs",
   "datasheet-units.test.mjs",
   "ecad-autobuild-units.test.mjs",
   "ecad-units.test.mjs",

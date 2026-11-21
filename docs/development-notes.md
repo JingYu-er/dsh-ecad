@@ -6062,7 +6062,31 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S211）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S212）
+
+### 二百一十九、点一下变空白，是渲染期抛了异常（S212）
+
+用户报「硬件台里面的东西点一下，点完之后什么也不显示了」。这个仓库里同一种病已经犯过两次（`D32_BUTTON` 未定义、hooks 顺序变化），两次都是**真 React 遇到渲染期异常就把整棵子树卸载**，页面上表现为空白，而不是一条报错。
+
+这次没有再靠猜，而是补了一个离线渲染探针 `test/client-render-units.test.mjs`：最小 hooks 运行时（`useState` 真改并触发重渲染、`useEffect` 真跑并记 cleanup、类组件真 `new`），把面板渲染出来，然后按文案把五个页签与「2D 视图 / 3D 视图 / 刷新 / 连接 KiCad / 顶层 / 位号」挨个点一遍。探针第一版自身有三个坑：`document.getElementById` 与 `window.addEventListener` 要打桩、面板的轮询 `setInterval` 必须换成不触发的桩（否则 effect 每跑一轮多一个定时器，进程永远退不出去）、`this.render` 在对象字面量里是 `undefined`（`this` 不是那个对象）。
+
+探针跑起来一次就抓到四处真异常，全部是「某个字段没回来就直接读」：
+
+| 位置 | 崩法 | 触发条件 |
+| --- | --- | --- |
+| `OverviewPanel` | `ReferenceError: pinout is not defined` | 概览页；`pinout`/`clocks`/`artifacts` 是固件侧（dsh-stm32）残留，硬件侧早就没有这三个变量 |
+| `layoutSchematic` | `Cannot read properties of undefined (reading 'blocks')` | 流程图页；`diagram` 是 `undefined`（接口失败/老回包），而判断写的是 `!== null` |
+| `EcadPanel` 的 BOM 头 | `Cannot read properties of undefined (reading 'length')` | 电路设计页；`bomView.ok === false` 时没有 `lines`，表头却先读 `bomView.lines.length` |
+| `FaultPanel` | `faults is not iterable` | 故障页；`state.faults` 是 `undefined`（既不是 `null` 也不是数组） |
+
+四条修法都是同一个口径：**先问形状，再读字段**（`Array.isArray` / `?? 默认值` / `undefined` 与 `null` 一起判）。概览页顺带把那三个固件侧变量换成本机事实：用 `useEcad` 拿 `latest.boardFile` 显示「板子」，型号/时钟/容量这类信息留在固件插件里。
+
+另外补了两层兜底，免得下一次再整片空白：
+
+- `class PanelBoundary extends Component`（`getDerivedStateFromError`）——出错时只把**当前页签的内容**换成「这个视图渲染出错（页面其余部分不受影响）」+ `message` + 栈，标签条与其它页签照常可用；
+- `guarded(component)` 包住 `conversation.view` 与 `turnTail` 两个槽位的组件，代价是每次渲染多一层 `div`。
+
+教训有两条。**第一，空白不是「没数据」，是「有异常」**：数据缺失应当渲染成「—」，渲染成空白只说明没人接住异常。**第二，探针要能点**：只渲染首屏测不出「点一下」的问题，代价是写一个几十行的假 hooks 运行时——但比让用户截图描述"点了就没"便宜得多。
 
 ### 二百一十八、长任务的结果落成对话里的卡片（S211）
 
