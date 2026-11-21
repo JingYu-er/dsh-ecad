@@ -159,6 +159,17 @@ const autorouteOutput: JsonSchema = {
     },
     warnings: { type: "array", items: { type: "string" } },
     notes: { type: "array", items: { type: "string" } },
+    clearance: {
+      type: "object",
+      description: "间距对账：请求值、引擎自报的最小值，以及是否降档；只对 strategy=own 有意义。",
+      additionalProperties: false,
+      properties: {
+        requestedMm: { type: "number" },
+        minUsedMm: { type: "number", description: "引擎自报的最小间距；-1 表示它没报" },
+        shortfall: { type: "boolean" },
+      },
+      required: ["requestedMm", "minUsedMm", "shortfall"],
+    },
   },
   required: ["ok", "error", "dryRun", "boardFile", "output", "engine", "seconds", "openNets", "steps", "warnings", "notes"],
 };
@@ -468,6 +479,7 @@ export function registerPcbTools(ctx: DshContext): void {
         strategy: { type: "string", enum: ["krt", "own"], description: "krt = 引擎自带的整套 autoroute（默认）；own = 用我们自己的规则直接调 route.py（显式线宽/间距/电源网/45° 平滑）。" },
         nets: { type: "array", items: { type: "string" }, description: "strategy=own 时要布的网络；缺省交给引擎按全部网络处理（耗时长）。" },
         ordering: { type: "string", enum: ["mps", "inside_out"], description: "strategy=own 的网络排序：mps（默认，先布大网）/ inside_out（由内向外）。" },
+        strictSizes: { type: "boolean", description: "strategy=own 时要求引擎不交付低于请求尺寸的板子（route.py 的 --strict-sizes）：细间距焊盘出口挤不下就整次失败，而不是悄悄降档。" },
       },
       required: [],
     },
@@ -488,7 +500,7 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 1_900_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[]; ordering?: string }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[]; ordering?: string; strictSizes?: boolean }, exec: ToolExec) => {
       const empty = { ok: false, error: "", dryRun: args.dryRun !== false, boardFile: "", output: "", engine: "", seconds: 0, openNets: -1, steps: [] as { tag: string; what: string; why: string; optional: boolean }[], warnings: [] as string[], notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
@@ -581,6 +593,7 @@ export function registerPcbTools(ctx: DshContext): void {
             maxRipup: 5,
             boardEdgeClearanceMm: 0.3,
             neckdownMm: 0.8,
+            strictSizes: args.strictSizes === true,
             nets: args.nets ?? [],
           },
           signal: exec.signal,
@@ -613,8 +626,12 @@ export function registerPcbTools(ctx: DshContext): void {
           notes.push("线宽分布：" + widthList.slice(0, 4).map(([width, count]) => width + " mm × " + String(count)).join("、") + (widthList.length > 4 ? " 等" : ""));
           notes.push("细段（焊盘出口 tap，引擎压到工艺下限）占 " + String(Math.round(own.thinRatio * 100)) + "%，共 " + String(own.segments) + " 段");
         }
-        if (typeof summary.min_clearance_used === "number" && summary.min_clearance_used < preset.signalClearanceMm) {
-          notes.push("引擎有一次降档：实际最小间距 " + String(summary.min_clearance_used) + " mm（局部挤不下时它按工艺下限走）");
+        if (own.clearanceShortfall) {
+          notes.push(
+            "间距降档：请求 " + String(own.requestedClearanceMm) + " mm，实际最小 " + String(own.minClearanceUsedMm) + " mm（细间距焊盘出口挤不下时引擎按工艺下限走；要它拒绝交付就传 strictSizes: true）",
+          );
+        } else if (own.minClearanceUsedMm !== null) {
+          notes.push("间距按请求执行：实际最小 " + String(own.minClearanceUsedMm) + " mm");
         }
         if (args.apply === true && own.ok) {
           copyFileSync(board, board + ".bak");
@@ -631,6 +648,7 @@ export function registerPcbTools(ctx: DshContext): void {
           engine: "KiCadRoutingTools route.py（自有规则）",
           seconds: own.seconds,
           openNets: -1,
+          clearance: { requestedMm: own.requestedClearanceMm, minUsedMm: own.minClearanceUsedMm === null ? -1 : own.minClearanceUsedMm, shortfall: own.clearanceShortfall },
           steps: [],
           warnings: (summary.failed_single ?? []).concat(summary.open_single ?? []).map((net) => "未布通：" + net),
           notes,

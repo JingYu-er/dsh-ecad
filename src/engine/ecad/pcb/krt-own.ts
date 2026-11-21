@@ -49,6 +49,13 @@ export interface OwnRuleOptions {
   boardEdgeClearanceMm?: number;
   /** 焊盘出口收窄段长度（mm），默认 0.8；引擎默认 2.5 会让细段占比过高。 */
   neckdownMm?: number;
+  /**
+   * 要求引擎「不交付低于请求尺寸的板子」（route.py 的 --strict-sizes）。
+   *
+   * 默认关：细间距焊盘出口必然要降档，关着能拿到一块能看的板子，代价是
+   * 报告里要如实写「实际做到多少」。打开后引擎以非零退出，我们据此失败。
+   */
+  strictSizes?: boolean;
 }
 
 export interface OwnRuleRequest {
@@ -92,6 +99,12 @@ export interface OwnRuleReport {
   error: string;
   output: string;
   seconds: number;
+  /** 请求的间距；用来和引擎实际做到的对账。 */
+  requestedClearanceMm: number;
+  /** 引擎自报的最小间距（route.py 的 min_clearance_used）；读不到为 null。 */
+  minClearanceUsedMm: number | null;
+  /** 实际布线间距低于请求值的部分是否超过 0.005 mm。 */
+  clearanceShortfall: boolean;
   /** route.py 写出的汇总（--json-out），字段随引擎版本变化，原样回传。 */
   summary: Record<string, unknown>;
   /** 产出板子的走线宽度分布（mm → 段数）与「细段」统计。 */
@@ -380,6 +393,7 @@ export function ownRuleArgv(runtimeRoot: string, request: Omit<OwnRuleRequest, "
   if (options.boardEdgeClearanceMm !== undefined) args.push("--board-edge-clearance", options.boardEdgeClearanceMm.toFixed(3));
   if (options.nets !== undefined && options.nets.length > 0) args.push("--nets", ...options.nets);
   if (options.smoothing !== false) args.push("--smoothing");
+  if (options.strictSizes === true) args.push("--strict-sizes");
   return args;
 }
 
@@ -414,11 +428,16 @@ export async function runOwnRuleRoute(request: OwnRuleRequest): Promise<OwnRuleR
   const exitOk = result.exitCode === 0 && result.spawnError === null;
   const produced = existsSync(absFrom(request.inputPcb, request.outputPcb));
   const tail = result.stderr.split(/\r?\n/u).filter((line) => line.trim() !== "").slice(-1)[0] ?? "";
+  const parsedMin = Number(summary["min_clearance_used"]);
+  const minClearanceUsedMm = Number.isFinite(parsedMin) && parsedMin > 0 ? parsedMin : null;
+  const strict = request.options.strictSizes === true;
   const error = result.timedOut
     ? "布线超时（" + String(Math.round(seconds)) + " 秒）"
     : exitOk && produced
       ? ""
-      : "布线没有产出板子：" + (tail === "" ? "引擎没有给出原因" : tail);
+      : (strict ? "引擎按 strictSizes 拒绝交付：实际做到的最小尺寸低于请求（" : "布线没有产出板子：")
+        + (tail === "" ? "引擎没有给出原因" : tail)
+        + (strict ? "）" : "");
   const widths = produced ? widthHistogram(readFileSync(request.outputPcb, "utf8")) : {};
   const segments = Object.values(widths).reduce((sum, count) => sum + count, 0);
   const requested = request.options.trackWidthMm;
@@ -430,6 +449,9 @@ export async function runOwnRuleRoute(request: OwnRuleRequest): Promise<OwnRuleR
     error,
     output: produced ? request.outputPcb : "",
     seconds,
+    requestedClearanceMm: request.options.clearanceMm,
+    minClearanceUsedMm,
+    clearanceShortfall: minClearanceUsedMm !== null && minClearanceUsedMm < request.options.clearanceMm - 0.005,
     summary,
     widths,
     thinRatio: segments === 0 ? 0 : thin / segments,

@@ -103,7 +103,7 @@ dsh plugin --profile desktop add dsh-ecad
 | `stm32_stackup` | 按层数取嘉立创常规叠层，反算 50/90/100 Ω 的线宽与间距 |
 | `stm32_impedance` | 把阻抗目标写成 `.kicad_dru` 的线宽/间距规则（DRC 无 impedance 约束） |
 
-### 校验与成本
+## 校验与成本
 
 | 工具 | 说明 |
 | --- | --- |
@@ -162,10 +162,21 @@ dsh plugin --profile desktop add dsh-ecad
 
 拆分前的 `DSH_STM32_*` 旧名仍然认（新名优先）：已经配过旧名的机器不用改。`~/.dsh-ecad/config.json` 不存在时会读旧的 `~/.dsh-stm32/config.json`。
 
+### 整链回归
+
+改布线器、布局或去耦策略后，先跑一条命令拿到可比对的数字，再谈提交：
+
+```bash
+node scripts/chain-report.mjs <工程目录> --clearance 0.2 --width 0.25 --strip
+```
+
+六步（放置 → 去耦落位 → 铺平面 → 自有规则布线 → 重填铺铜 → DRC）依次执行，末行打印固定格式表格，报告写到 `%TEMP%/dsh-ecad-chain/<工程>/chain-report.json`。`--strip` 先清掉已有走线（人工画完的板子不清线，「布线」这一步其实没活干，量出来的段数是别人画的）；`--strict` 让布线器在做不到请求间距时失败。
+
 ## 已知限制
 
 - **自动布线是辅助**：KiCadRoutingTools 能布通、DRC 干净，但线形不如人工；插件只做「布通 + 体检」，不假装能替代手工走线。
-- **细间距档**：布线器按嘉立创工艺下限走线（1–2 层 0.127 mm，≥4 层 0.10 mm，另有 0.003 mm 量化余量），要做到 0.2 mm 统一档需人工加宽。
+- **细间距档**：布线器按嘉立创工艺下限走线（1–2 层 0.127 mm，≥4 层 0.10 mm，另有 0.003 mm 量化余量），要做到 0.2 mm 统一档需人工加宽。请求值与引擎实测值会同时报出来（`clearance.minUsedMm`）；`strictSizes: true` 让它在做不到时直接失败而不是降档交付。
+- **多层只验证到「平面 + 外层信号」**：四层/六层会先铺地与电源平面，再用外层与内层空余层布信号；六层目前把 In1/In2 让给平面，其余层是否都用上取决于布线器自身，实测段数与四层接近。
 - **KiCad 10 的 IPC 没有原理图读接口**：只能写（`CreateItems` 等），所以「读图」用本插件自己的解析器；`Update PCB from Schematic` 需要 KiCad 管理器打开工程（`RunAction` 未纳入自动流程）。
 - **3D 覆盖率**：tscircuit 产出的模型不保证每个封装都有；缺的会点名，不画假模型。
 - **手绘层不进构建目录**：`hardware/schematic/` 是人的图纸，构建不覆盖，也不会自动回流到 `circuit.tsx`（要显式 `stm32_sch_import`）。

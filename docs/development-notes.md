@@ -6064,6 +6064,37 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 
 ## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S216）
 
+### 二百二十五、降档要当场报，不许悄悄按工艺下限交（S219）
+
+`route.py` 的板级 `min_clearance` 会压过所有 net class，细间距焊盘出口挤不下时它把间距降下来继续布，只在 summary 里留一个 `min_clearance_used`。用户看到的是「要求 0.2，做出来 0.1452」，却从报告里读不到这件事。三件事一起补：
+
+1. **报数字**。`OwnRuleReport` 增 `requestedClearanceMm` / `minClearanceUsedMm` / `clearanceShortfall`（`min < requested - 0.005` 才算降档）。工具返回 `clearance: {requestedMm, minUsedMm, shortfall}`，面板与 chain 脚本打印「要求 X / 布线 Y / 引擎实测最小 Z（降档）」。schema 子集不支持 `type: ["number","null"]`，未知值用 `-1`。
+2. **给拒绝权**。`options.strictSizes` → `route.py --strict-sizes`：`fab_tiers.finish_design_rules()` 返回非零就 `sys.exit(_rc857)`，整次布线失败、不出板。默认不传——失败比降档更糟，用户要的是「要么按 0.2，要么告诉我做不到」。
+3. **诚实归因**。notes 写明「引擎按嘉立创工艺下限布，且焊盘出口有 neckdown」，不把降档说成「我们按 0.2 布的」。
+
+实测（handheld，2 层，要求 0.2）：交付 **547 段 / 83 过孔 / 0 未连接 / 111 错 / 53 警**，最小间距 **0.1452**；加 `--strict` 时引擎直接拒绝，后续步骤不执行并如实报错。
+
+教训：**「参数传下去了」不等于「参数被执行了」**。凡是把请求交给外部引擎的，都要回读它实际做到的数字，并且给用户一个「做不到就别交」的开关。
+
+### 二百二十四、整链要能一条命令重跑（S218）
+
+「放置 → 去耦落位 → 铺平面 → 自有规则布线 → 重填铺铜 → DRC」此前只有零散探针数字，改一次布线器就没人知道是好了还是坏了。新增 `scripts/chain-report.mjs`：
+
+1. **一条命令**：`node scripts/chain-report.mjs <工程> [--layers N] [--clearance 0.2] [--width 0.25] [--strip] [--strict] [--out 报告]`，六步全跑，末行打印固定格式表格、写 `chain-report.json`。
+2. **保真三件**：工作副本要带同名 `.kicad_pro`（否则 DRC 按默认档判）、`tscircuit:chip` 要先 `materializeBoardLibraries` 物化成工程本地库（否则 32 条 `lib_footprint_issues` 盖住真问题）、`effectiveRouteSpec` 读**原始**板子而不是副本。
+3. **`--strip` 的意义**：人工画完的板子已经连通，直接跑「布线」等于什么都没布，量出来的段数是别人画的。清线再布，数字才是自己的。
+
+基线（`handheld` / 人工四层板 / 六层合成板，2 层那次 547 段写在上一条）：
+
+| 场景 | 层 | 平面 | 段 / 过孔 | 最小间距 | DRC 错/警 | 未连接 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 人工四层板清线重布 | 4 | GND→In1、AVDD_5V→In2 | 1156 / 189 | 0.175（降档） | 88 / 58 | 0 |
+| 六层合成板清线重布 | 6 | 同上 | 1123 / 192 | 0.175（降档） | 97 / 57 | 0 |
+
+四层与六层都 0 未连接——平面 + 布线 + `ZONE_FILLER` 重填这条链在多层板上成立。剩下的 88/97 条错误集中在 `lib_footprint_mismatch 49`（板子的封装与库不一致）、`drill_out_of_range`/`via_diameter` 各 36–39（引擎把过孔缩到钻孔 0.25，而板级规则要求 0.3）——都是「引擎与板子规则不同档」，和间距那条同一类问题。
+
+教训：**没有固定格式的整链报告，性能与质量就只能靠记忆**。
+
 ### 二百二十三、换协议不是改一行字段（S216）
 
 把 MIT 换成 Apache-2.0，动的不只是 `package.json` 的 `license`：

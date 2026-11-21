@@ -142,3 +142,24 @@ test("预设不能比板子自己的规则更松：间距/过孔取较严的一�
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("自有规则布线：strictSizes 才会传 --strict-sizes，默认不传（S218）", () => {
+  const base = {
+    inputPcb: "in.kicad_pcb",
+    outputPcb: "out.kicad_pcb",
+    options: {
+      trackWidthMm: 0.2,
+      clearanceMm: 0.2,
+      powerNets: ["*GND*"],
+      powerWidthMm: 0.45,
+      layers: ["F.Cu", "B.Cu"],
+      ordering: "mps",
+      viaSizeMm: 0.45,
+      viaDrillMm: 0.25,
+      maxRipup: 2,
+    },
+  };
+  assert.ok(!ownRuleArgv("C:/krt", base).includes("--strict-sizes"));
+  const strict = ownRuleArgv("C:/krt", { ...base, options: { ...base.options, strictSizes: true } });
+  assert.ok(strict.includes("--strict-sizes"));
+});
