@@ -189,6 +189,12 @@ npm run test:size           # 需 export npm_config_cache=/tmp/npmcache
 - [tscircuit](https://github.com/tscircuit/tscircuit)（MIT）：`circuit.tsx` 到 KiCad 工程。
 - [uPesy/easyeda2kicad.py](https://github.com/uPesy/easyeda2kicad.py) 的 `CMD_FOOTPRINT.md`：立创封装字段与层号的事实来源（文档参考，未复制代码）。
 
+## 许可证
+
+Apache License 2.0，见 [LICENSE](LICENSE)。本包内联了 three.js（MIT），其版权与许可声明保留在
+[NOTICE](NOTICE) 与 `lib/viewer.bundle.js` 的文件头中；驱动而不分发的外部程序（KiCad、KiCadRoutingTools、
+tscircuit、poppler）各自保留其许可证。
+
 ## 文档
 
 - [使用与维护指南](docs/reading-guide.md)

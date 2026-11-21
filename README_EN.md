@@ -167,6 +167,13 @@ npm run test:size
 
 KiCad, KiCadRoutingTools (MIT), tscircuit (MIT), and the `CMD_FOOTPRINT.md` documentation from uPesy/easyeda2kicad.py as the factual reference for LCSC/ EasyEDA footprint fields.
 
+## License
+
+Apache License 2.0, see [LICENSE](LICENSE). The package bundles three.js (MIT); its copyright and
+license notice is retained in [NOTICE](NOTICE) and in the banner of `lib/viewer.bundle.js`. External
+programs that the plugin drives but does not distribute (KiCad, KiCadRoutingTools, tscircuit, poppler)
+keep their own licenses.
+
 ## Docs
 
 - [Reading guide](docs/reading-guide.md)

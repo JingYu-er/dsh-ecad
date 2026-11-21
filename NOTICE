@@ -1,0 +1,54 @@
+dsh-ecad
+Copyright 2026 dsh-ecad contributors
+
+This product is licensed under the Apache License, Version 2.0. See the
+LICENSE file for the full text.
+
+--------------------------------------------------------------------------
+Bundled and derived third-party software
+--------------------------------------------------------------------------
+
+The following components are redistributed inside this package (notably
+client/viewer.bundle.js, which bundles the browser viewer) or are used at
+build time. Their notices are retained here as required by their licenses.
+
+1. three.js
+   Copyright 2010-2024 three.js authors
+   License: MIT
+   Source: https://github.com/mrdoob/three.js
+   Used by: client/viewer/entry.js, bundled into lib/viewer.bundle.js
+   (WebGL board renderer, OrbitControls, GLTFLoader).
+
+2. esbuild
+   Copyright 2020 Evan Wallace
+   License: MIT
+   Source: https://github.com/evanw/esbuild
+   Used by: build time only (scripts/build-viewer.mjs); not redistributed.
+
+3. TypeScript
+   Copyright Microsoft Corporation
+   License: Apache-2.0
+   Source: https://github.com/microsoft/TypeScript
+   Used by: build time only; not redistributed.
+
+--------------------------------------------------------------------------
+Interoperating software (not redistributed)
+--------------------------------------------------------------------------
+
+The plugin drives the following programs through their own command-line
+interfaces. They are not part of this package and keep their own licenses:
+
+- KiCad (GPL-3.0) — https://www.kicad.org/
+- KiCadRoutingTools (MIT) — https://github.com/alphapixels/KiCadRoutingTools
+- tscircuit (MIT) — https://github.com/tscircuit/tscircuit
+- poppler / pdftotext (GPL-2.0) — https://poppler.freedesktop.org/
+- Node.js (MIT) — https://nodejs.org/
+
+--------------------------------------------------------------------------
+Factual references (no code copied)
+--------------------------------------------------------------------------
+
+- uPesy/easyeda2kicad.py, CMD_FOOTPRINT.md — factual reference for LCSC /
+  EasyEDA footprint field names and layer numbers.
+- JLCPCB public process documentation — fabrication limits and pricing
+  tiers used by the DFM checks.

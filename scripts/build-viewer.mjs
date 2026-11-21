@@ -29,6 +29,15 @@ await build({
   target: ["es2020"],
   minify: true,
   legalComments: "none",
+  // 打包会内联 three.js（MIT）：保留版权与许可声明，NOTICE 里同时有一份。
+  banner: {
+    js: [
+      "/*! dsh-ecad viewer bundle",
+      " * Includes three.js, Copyright 2010-2024 three.js authors, MIT License.",
+      " * See NOTICE and LICENSE in this package for the full attributions.",
+      " */",
+    ].join("\n"),
+  },
   define: { "process.env.NODE_ENV": '"production"' },
   outfile: out,
   logLevel: "warning",

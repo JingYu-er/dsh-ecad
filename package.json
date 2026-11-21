@@ -18,7 +18,8 @@
     "cordis.patch.yml",
     "README.md",
     "README_EN.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=20"
@@ -45,7 +46,7 @@
     "cmsis-dap",
     "gdb"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "dsh-stm32 contributors",
   "repository": {
     "type": "git",

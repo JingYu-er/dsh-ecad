@@ -6062,7 +6062,20 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S215）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S216）
+
+### 二百二十三、换协议不是改一行字段（S216）
+
+把 MIT 换成 Apache-2.0，动的不只是 `package.json` 的 `license`：
+
+1. **LICENSE 用原文**。从 apache.org 取 `LICENSE-2.0.txt` 原文（202 行）落盘，再在末尾补本项目的版权与「Licensed under the Apache License, Version 2.0」声明段。手打或改写条文等于换了一份许可证。
+2. **NOTICE 是 Apache-2.0 的义务，不是装饰**。§4(d) 要求分发时保留被分发作品的归属声明，所以 NOTICE 必须写清三类：包内联的（three.js，MIT，随 `lib/viewer.bundle.js` 一起分发）、只在构建期用的（esbuild、typescript，不分发）、驱动但不分发的（KiCad、KiCadRoutingTools、tscircuit、poppler）。
+3. **内联代码要留声明**。`scripts/build-viewer.mjs` 原先把 `legalComments` 设成 `none`，three 的版权头被剥掉；加 `banner` 把版权与「见 NOTICE/LICENSE」写回 bundle 文件头，NOTICE 与文件头两份互相兜底。
+4. **`files` 要带上 NOTICE**，否则发布包里没有它。`npm pack --dry-run` 确认 `LICENSE 12.0kB` 与 `NOTICE 2.2kB` 都在，182 个文件。
+
+数字：包体 807.8 → **812.3 KB / 182 文件**（解包 3529.5 KB），许可证文本与 NOTICE 合计约 14 KB；30 套件 / 318 pass 不变。
+
+教训：**许可证是发布物的一部分**，改协议要同时改 LICENSE 原文、NOTICE 归属、内联代码的版权头、`files` 清单与 README 的许可证段落——少一处，发布包就不合规。
 
 ### 二百二十二、两套 3D 只能留一套（S215）
 
