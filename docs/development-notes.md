@@ -6062,13 +6062,26 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S212）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S213）
+
+### 二百二十、硬件台的首屏不该是串口日志（S213）
+
+硬件台（`conversation.view` 的 `ecad`）打开时默认落在「实时通道」：串口 0 行、RTT 0 行、监视 0 行三块，而页签条上根本没有这个按钮。原因是页签按钮早被删掉了，`useState("channels")` 与 `tab === "channels" ? channelBlocks : null` 这两句却留在代码里——首屏于是渲染了固件侧（dsh-stm32）的串口通道，页签一个都不高亮。
+
+两条一起改：
+
+1. **默认页改成「电路设计」**，并且把 `channelBlocks`、`useChannelTaps`/`useSerialState`/`useWatchRecording` 这些只服务通道取值一并从渲染路径上摘掉——它们留着就会继续轮询 `/channel-taps`、`/serial`、`/watch-record`。硬件台的第一件事是板子，不是固件侧的三条日志。
+2. **3D 草图要看得出来**。之前只有一个在「2D 视图 / 3D 视图」之间切换的按钮，名字也不像「3D 在这里」；现在并排两个按钮「2D 板图 / 3D 草图」，选中项用 `interactive-bg-active` 标出来；`board3d` 缺失时不再给空白，而是说明「这张回包里没有 3D 骨架：刷新一次板图，或重启 DSH 载入新版本」。
+
+离线点按探针同步钉两条：首屏含「器件搜索」（说明默认页是电路设计）、不含「串口」「RTT」（说明通道块确实没了），点击列表改成「2D 板图 / 3D 草图 / 刷新 / 连接 KiCad / 顶层 / 位号」。
+
+教训：删掉一个页签的按钮，不等于删掉这个页签——默认值和渲染分支会把它留在首屏上。
 
 ### 二百一十九、点一下变空白，是渲染期抛了异常（S212）
 
 用户报「硬件台里面的东西点一下，点完之后什么也不显示了」。这个仓库里同一种病已经犯过两次（`D32_BUTTON` 未定义、hooks 顺序变化），两次都是**真 React 遇到渲染期异常就把整棵子树卸载**，页面上表现为空白，而不是一条报错。
 
-这次没有再靠猜，而是补了一个离线渲染探针 `test/client-render-units.test.mjs`：最小 hooks 运行时（`useState` 真改并触发重渲染、`useEffect` 真跑并记 cleanup、类组件真 `new`），把面板渲染出来，然后按文案把五个页签与「2D 视图 / 3D 视图 / 刷新 / 连接 KiCad / 顶层 / 位号」挨个点一遍。探针第一版自身有三个坑：`document.getElementById` 与 `window.addEventListener` 要打桩、面板的轮询 `setInterval` 必须换成不触发的桩（否则 effect 每跑一轮多一个定时器，进程永远退不出去）、`this.render` 在对象字面量里是 `undefined`（`this` 不是那个对象）。
+这次没有再靠猜，而是补了一个离线渲染探针 `test/client-render-units.test.mjs`：最小 hooks 运行时（`useState` 真改并触发重渲染、`useEffect` 真跑并记 cleanup、类组件真 `new`），把面板渲染出来，然后按文案把五个页签与「2D 板图 / 3D 草图 / 刷新 / 连接 KiCad / 顶层 / 位号」挨个点一遍。探针第一版自身有三个坑：`document.getElementById` 与 `window.addEventListener` 要打桩、面板的轮询 `setInterval` 必须换成不触发的桩（否则 effect 每跑一轮多一个定时器，进程永远退不出去）、`this.render` 在对象字面量里是 `undefined`（`this` 不是那个对象）。
 
 探针跑起来一次就抓到四处真异常，全部是「某个字段没回来就直接读」：
 

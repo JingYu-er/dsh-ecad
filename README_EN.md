@@ -113,7 +113,7 @@ Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the foo
 
 ## Hardware console
 
-The `conversation.view` tab "硬件台" (Hardware console) sits next to the firmware plugin's debug console. Tabs: overview, events, flow chart, circuit design, faults, artifacts, changes. "Circuit design" holds board view (2D, plus a 3D sketch; clicking a BOM reference or a layout finding highlights it), BOM, power budget, stackup, consistency, EMC, mechanical, 3D preview, fabrication files and part search. Turns that ran design / DRC / routing / placement / layout-check / board-view also get a turn-tail summary card in the conversation; details stay in the console. Project selection is per session; the status bar shows plugin version, route count and a "newer build available" hint.
+The `conversation.view` tab "硬件台" (Hardware console) sits next to the firmware plugin's debug console. Tabs: overview, events, flow chart, circuit design, faults; the console opens on "circuit design" (a board, not the firmware serial log). "Circuit design" holds board view ("2D board" / "3D sketch" buttons; clicking a BOM reference or a layout finding highlights it), BOM, power budget, stackup, consistency, EMC, mechanical, 3D preview, fabrication files and part search. Turns that ran design / DRC / routing / placement / layout-check / board-view also get a turn-tail summary card in the conversation; details stay in the console. Project selection is per session; the status bar shows plugin version, route count and a "newer build available" hint.
 
 ## Project layout
 

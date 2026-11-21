@@ -290,7 +290,7 @@ test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲
   // 点击定位（S210）：BOM 位号与布局发现的「定位」设同一个 pcbFocus，2D 与 3D 共用。
   assert.ok(source.includes('const [pcbFocus, setPcbFocus] = useState("");'), "高亮要有一个共享状态");
   assert.ok(source.includes("usePcbView(projectDir, pcbShow, pcbFocus)"), "板图请求要带上高亮位号");
-  assert.ok(source.includes("focus: pcbFocus"), "3D 视图也要吃同一个高亮");
+  assert.ok(source.includes("focus: pcbFocus"), "3D 草图也要吃同一个高亮");
   assert.ok(source.includes("onClick: () => setPcbFocus(ref)"), "点 BOM 位号要能定位");
   assert.ok(source.includes('"定位 " + ref'), "布局发现旁要有定位按钮");
   assert.ok(source.includes("params.push(\"focus=\" + encodeURIComponent(focus))"), "高亮要以 focus 查询参数发给服务端");
