@@ -1,6 +1,6 @@
 {
   "name": "dsh-ecad",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH 插件：硬件设计工具层 —— tscircuit 原理图与库、KiCad PCB 放置/布线/DRC/DFM、BOM 与成本、叠层阻抗、EMC、机械、Gerber 与 3D",
   "type": "module",
   "main": "lib/index.js",

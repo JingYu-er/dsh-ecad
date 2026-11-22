@@ -1,7 +1,7 @@
 # dsh-ecad
 
 [![license](https://img.shields.io/github/license/JingYu-er/dsh-ecad)](LICENSE)
-[![version](https://img.shields.io/badge/version-0.1.1-orange)](https://github.com/JingYu-er/dsh-ecad)
+[![version](https://img.shields.io/badge/version-0.1.2-orange)](https://github.com/JingYu-er/dsh-ecad)
 
 Hardware-side DSH plugin for STM32 projects: schematics, PCB, fabrication files, cost and checks. It is the sibling of the firmware plugin `dsh-stm32`; the two exchange facts through `<project>/dsh/mcu.json`, their tool names do not overlap, and both can be installed together.
 
@@ -36,7 +36,7 @@ dsh plugin --profile desktop add dsh-ecad
 
 Fully quit and restart DSH afterwards; the plugin layer is only loaded at process start.
 
-- Verify: `dsh plugin --profile desktop why dsh-ecad` reports `0.1.1`
+- Verify: `dsh plugin --profile desktop why dsh-ecad` reports `0.1.2`
 - Remove: `dsh plugin --profile desktop remove dsh-ecad`, then restart
 
 External dependencies (each tool states what is missing):
