@@ -37,11 +37,11 @@ function stubLocalStorage() {
 test("电路设计页显示共享运行时与最近一次自动构建（S136）", () => {
   const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(source.includes("function autoBuildText("));
-  assert.ok(source.includes("共享运行时 "));
-  assert.ok(source.includes("本工程未挂载"));
-  assert.ok(source.includes("依赖已挂载"), "工程级挂载状态与机器共享运行时是两个数，标签要分开");
+  // 顶部状态行已撤（S225）：运行时与自动构建仍有取值与文案函数，只是不再铺在面板上。
+  assert.ok(source.includes("function autoBuildText("));
   assert.ok(source.includes("ecad.autoBuild"));
   assert.ok(source.includes("autoBuild.lastOk === true"));
+  assert.equal(source.includes("共享运行时 "), false, "状态行不再渲染");
 });
 
 test("设计通过后提示是否导出 STEP 与 Gerber（S137）", () => {
@@ -223,8 +223,8 @@ test("电路设计页在数据回来之前不读空对象，避免整页空白�
 
 test("电路设计页显示布线引擎状态，并可勾选含布线（S146）", () => {
   const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
-  assert.ok(source.includes("布线引擎未安装"));
   assert.ok(source.includes("含布线"));
+  assert.ok(source.includes("autoroute.ready !== true"), "含布线勾选要按引擎是否就绪禁用");
   assert.ok(source.includes("pcb: true"));
   assert.ok(source.includes("autoroute.ready"));
 });

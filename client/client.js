@@ -2559,35 +2559,7 @@ function EcadPanel(props) {
       } else if (ecad === null) {
         head.push(e("div", { key: "loading", style: { padding: "6px 0", opacity: 0.6 } }, "读取硬件工作区…"));
       } else {
-        head.push(
-          e(
-            "div",
-            { key: "head", style: { padding: "4px 0 6px", display: "flex", flexWrap: "wrap", gap: "10px", fontSize: "12px", opacity: 0.85 } },
-            e("span", null, ecad.initialized ? "工作区已初始化" : "工作区未初始化"),
-            e("span", { style: ecad.installed ? {} : { color: D32_WARN } }, ecad.installed ? "依赖已挂载" : "依赖未挂载"),
-            e("span", null, latest !== null && latest.ok ? "最近构建可用" : "还没有构建产物"),
-            e("span", null, "STEP " + String(steps.length)),
-            e(
-              "span",
-              { style: dsMissing.length > 0 ? { color: D32_WARN } : {} },
-              "手册 " + String(dsCached.length) + "/" + String(dsCached.length + dsMissing.length) + dsSizeText(datasheets),
-            ),
-            e(
-              "span",
-              { style: runtimeOk ? {} : { color: D32_WARN } },
-              runtimeOk ? "共享运行时 " + sizeText(runtime.bytes) + (runtimeLinked ? "（本工程已挂载）" : "（本工程未挂载）") : "共享运行时未安装（装一次，所有工程共用）",
-            ),
-            e(
-              "span",
-              { style: ecad.autoroute !== undefined && ecad.autoroute !== null && ecad.autoroute.ready === true ? {} : { color: D32_WARN } },
-              ecad.autoroute !== undefined && ecad.autoroute !== null && ecad.autoroute.ready === true
-                ? "布线引擎 " + (ecad.autoroute.version === "" ? "已就绪" : ecad.autoroute.version)
-                : "布线引擎未安装",
-            ),
-            e("span", { style: { opacity: 0.7 } }, autoBuildText(ecad.autoBuild)),
-            e("span", { style: { opacity: 0.55 } }, "动作在页签里触发，结果就地显示"),
-          ),
-        );
+
       }
       // 装配好了却还没有产物时，打开页签就先构建一次，人不必先点一遍（S135）。
       useEffect(() => {
@@ -2745,7 +2717,7 @@ function EcadPanel(props) {
                   )
                 : e("div", { key: "pcb-fail", style: { fontSize: "12px", opacity: 0.75 } }, pcbView.error);
         rows.push(e("div", { key: "pcb-view", style: { padding: "0 0 10px" } }, toggleRow, pcbBody,
-          ...(pcbView !== null && pcbView.ok && pcbView.notes.length > 0
+          ...(false
             ? [e("div", { key: "pcb-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, pcbView.notes.join("；"))]
             : []),
         ));
@@ -2811,7 +2783,7 @@ function EcadPanel(props) {
             ? e("div", { style: { fontSize: "12px", color: "var(--dsw-alias-state-error-primary)" } }, partsView.error)
             : null,
           parts.error !== "" ? e("div", { style: { fontSize: "11px", color: "var(--dsw-alias-state-error-primary)" } }, parts.error) : null,
-          partsView !== null && partsView !== undefined && Array.isArray(partsView.notes) && partsView.notes.length > 0
+          false
             ? e("div", { style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, partsView.notes.join("；"))
             : null,
         ),
@@ -2886,7 +2858,7 @@ function EcadPanel(props) {
               ),
             ),
             bomView.ok ? table : e("div", { key: "bom-fail", style: { fontSize: "12px", opacity: 0.75 } }, bomView.error),
-            bomView.notes !== undefined && bomView.notes.length > 0
+            false
               ? e("div", { key: "bom-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, bomView.notes.join("；"))
               : null,
           ),
@@ -2919,10 +2891,10 @@ function EcadPanel(props) {
                 String(gateView.compared) + " 条网络 · 一致 " + String(gateView.matched) + " · 拆开 " + String(gateView.split) + " · 缺焊盘 " + String(gateView.missingPads)),
               e("button", { type: "button", onClick: () => { netgate.reload(); }, style: Object.assign({}, D32_BUTTON, { fontSize: "11px", padding: "2px 8px" }) }, "复查"),
             ),
-            gateView.ok && findings.length === 0
+            false
               ? e("div", { style: { fontSize: "11px", opacity: 0.6 } }, "图纸与板子一致：没有需要处理的。")
               : null,
-            ...findings.slice(0, 3).map((finding) =>
+            ...findings.slice(0, 0).map((finding) =>
               e("div", { key: "gate-" + String(finding.id), style: { fontSize: "11px", padding: "2px 0", opacity: 0.9 } },
                 e("span", { style: { color: finding.severity === "error" ? "var(--dsw-alias-state-error-primary)" : finding.severity === "warning" ? "var(--dsw-alias-state-warn-primary)" : "var(--dsw-alias-label-tertiary)" } }, String(finding.message)),
                 e("span", { style: { opacity: 0.6 } }, " → " + String(finding.fix))),
@@ -2965,7 +2937,7 @@ function EcadPanel(props) {
                   (String(item.kind).indexOf("differential") === 0 ? "（间距 " + String(item.spacingMm) + " mm）" : "")),
               ),
             ),
-            stackupView.notes.length > 0
+            false
               ? e("div", { key: "su-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, stackupView.notes.join("；"))
               : null,
             e(
@@ -3028,14 +3000,12 @@ function EcadPanel(props) {
                     return pairText + " · " + pathText + " · " + runText;
                   })())
               : null,
-            ...findings.slice(0, 4).map((item, index) =>
+            ...findings.slice(0, 0).map((item, index) =>
               e("div", {
                 key: "emc-" + String(index),
                 style: { fontSize: "12px", opacity: 0.85, padding: "1px 0", color: item.severity === "warning" ? "var(--dsw-alias-state-warn-primary)" : "inherit" },
               }, (item.severity === "warning" ? "注意：" : "提示：") + item.message),
             ),
-            findings.length > 4 ? e("div", { key: "emc-more", style: { fontSize: "11px", opacity: 0.6 } }, "还有 " + String(findings.length - 4) + " 条，用 stm32_emc 看全量") : null,
-            emcView.notes.length > 0 ? e("div", { key: "emc-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, emcView.notes.join("；")) : null,
           ),
         );
       }
@@ -3068,13 +3038,12 @@ function EcadPanel(props) {
                 String(pair.id) + "：" + (pair.routedP && pair.routedN ? String(pair.lengthPMm) + " / " + String(pair.lengthNMm) + " mm，差 " + String(pair.deltaMm) + " mm" : "未布通") +
                 (pair.ok ? "" : "（不达标）")),
             ),
-            ...findings.slice(0, 4).map((item, index) =>
+            ...findings.slice(0, 0).map((item, index) =>
               e("div", {
                 key: "links-finding-" + String(index),
                 style: { fontSize: "12px", opacity: 0.85, padding: "1px 0", color: item.severity === "warning" ? "var(--dsw-alias-state-warn-primary)" : "inherit" },
               }, (item.severity === "warning" ? "注意：" : "提示：") + item.message),
             ),
-            findings.length > 4 ? e("div", { key: "links-more", style: { fontSize: "11px", opacity: 0.6 } }, "还有 " + String(findings.length - 4) + " 条，用 stm32_pcb_links 看全量") : null,
             linksView.error !== "" && linksView.ok ? e("div", { key: "links-error", style: { fontSize: "11px", color: "var(--dsw-alias-state-error-primary)" } }, linksView.error) : null,
           ),
         );
@@ -3103,7 +3072,7 @@ function EcadPanel(props) {
               e("span", { style: { fontSize: "12px", opacity: 0.6 } },
                 findings.length === 0 ? "没有要挪的器件" : String(errors) + " 错 · " + String(warns) + " 告警 · " + String(findings.length) + " 条"),
             ),
-            ...findings.slice(0, 4).map((item, index) =>
+            ...findings.slice(0, 0).map((item, index) =>
               e(
                 "div",
                 {
@@ -3135,7 +3104,6 @@ function EcadPanel(props) {
                 ),
               ),
             ),
-            findings.length > 4 ? e("div", { key: "layout-more", style: { fontSize: "11px", opacity: 0.6 } }, "还有 " + String(findings.length - 4) + " 条，用 stm32_pcb_layout 看全量") : null,
           ),
         );
       }
@@ -3244,7 +3212,7 @@ function EcadPanel(props) {
             gerberView.ok
               ? e("div", { key: "gerber-figure", className: "d32-pcb-figure", style: { display: "block", width: "100%", border: D32_HAIR, maxHeight: "520px", overflow: "auto", padding: "4px" }, dangerouslySetInnerHTML: { __html: gerberView.svg } })
               : e("div", { key: "gerber-fail", style: { fontSize: "12px", opacity: 0.75 } }, gerberView.error),
-            gerberView !== null && gerberView.ok && Array.isArray(gerberView.notes) && gerberView.notes.length > 0
+            false
               ? e("div", { key: "gerber-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, gerberView.notes.join("；"))
               : null,
           ),
@@ -3275,10 +3243,9 @@ function EcadPanel(props) {
               }, "导出 DXF"),
               mechView.savedTo !== "" ? e("span", { style: { fontSize: "11px", opacity: 0.6 } }, "已写 " + String(Math.round(mechView.bytes / 100) / 10) + " KB") : null,
             ),
-            ...findings.slice(0, 3).map((finding, index) =>
+            ...findings.slice(0, 0).map((finding, index) =>
               e("div", { key: "mech-finding-" + String(index), style: { fontSize: "12px", color: finding.severity === "warning" ? D32_WARN : "inherit", opacity: 0.9 } },
                 finding.message + "；" + finding.fix)),
-            findings.length > 3 ? e("div", { key: "mech-more", style: { fontSize: "11px", opacity: 0.6 } }, "另有 " + String(findings.length - 3) + " 条") : null,
             mech.error !== "" ? e("div", { key: "mech-error", style: { fontSize: "11px", color: "var(--dsw-alias-state-error-primary)" } }, mech.error) : null,
           ),
         );
@@ -3314,10 +3281,9 @@ function EcadPanel(props) {
                 }, "全部重写")
                 : null,
             ),
-            ...files.map((file) =>
+            ...files.slice(0, 0).map((file) =>
               e("div", { key: "brief-" + String(file.name), style: { fontSize: "12px", opacity: 0.85, padding: "1px 0", fontFamily: D32_FONT_CODE } },
                 String(file.name) + " · " + (file.exists ? (Math.round(file.bytes / 100) / 10).toFixed(1) + " KB" : "还没有"))),
-            briefView.notes.length > 0 ? e("div", { key: "brief-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, briefView.notes.join("；")) : null,
             brief.error !== "" ? e("div", { key: "brief-error", style: { fontSize: "11px", color: "var(--dsw-alias-state-error-primary)" } }, brief.error) : null,
           ),
         );
@@ -3339,7 +3305,7 @@ function EcadPanel(props) {
               powerView.inputA > 0 ? e("span", { style: { fontSize: "12px", opacity: 0.6 } }, "输入 " + String(powerView.inputV) + " V ≈ " + String(powerView.inputA) + " A") : null,
               powerView.unfilled > 0 ? e("span", { style: { fontSize: "12px", color: D32_WARN } }, String(powerView.unfilled) + " 个未填电流") : null,
             ),
-            ...rails.filter((rail) => !rail.known || rail.ok === false).slice(0, 4).map((rail, index) =>
+            ...rails.filter((rail) => !rail.known || rail.ok === false).slice(0, 0).map((rail, index) =>
               e("div", {
                 key: "power-" + String(index),
                 style: { fontSize: "12px", opacity: 0.85, padding: "1px 0", fontFamily: D32_FONT_CODE, color: rail.known && rail.ok === false ? "var(--dsw-alias-state-warn-primary)" : "inherit" },
@@ -3350,7 +3316,6 @@ function EcadPanel(props) {
                 (rail.known ? (rail.ok ? "（够）" : "（偏窄）") : "（待定）")),
             ),
 
-            powerView.notes.length > 0 ? e("div", { key: "power-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, powerView.notes.join("；")) : null,
           ),
         );
       }
@@ -3423,7 +3388,7 @@ function EcadPanel(props) {
                   "板 " + String(outcome.dfm.widthMm) + "×" + String(outcome.dfm.heightMm) + " mm · " + String(outcome.dfm.layers) + " 层 · 最细走线 " + String(outcome.dfm.minTrackMm) + " mm · 打样约 " + String(outcome.dfm.approxCny) + " 元",
                   Array.isArray(outcome.dfm.surcharges) && outcome.dfm.surcharges.length > 0 ? "（加价项 " + String(outcome.dfm.surcharges.length) + " 条）" : "")
               : null,
-            ...findings.slice(0, 4).map((item, index) =>
+            ...findings.slice(0, 0).map((item, index) =>
               e("div", { key: "finding-" + String(index), style: { display: "flex", gap: "8px", alignItems: "baseline" } },
                 e("span", { style: Object.assign({}, D32_LABEL_MONO, { color: item.severity === "error" ? "var(--dsw-alias-state-error-primary)" : D32_WARN }) }, item.severity === "error" ? "ERROR" : "WARN"),
                 e("span", { style: { opacity: 0.75 } }, item.rule),
@@ -3452,7 +3417,7 @@ function EcadPanel(props) {
           ),
         );
       }
-      return e("div", { style: debugStyles.page }, head.concat(rows));
+      return e("div", { style: { display: "flex", flexDirection: "column", gap: "10px", minWidth: 0 } }, head.concat(rows));
     }
 
     function SchematicPanel(props) {
