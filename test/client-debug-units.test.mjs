@@ -451,3 +451,11 @@ test("左侧导航固定，只有右侧内容滚动（S224）", () => {
   const mainRule = source.slice(source.indexOf(".d32-main {"), source.indexOf(".d32-main >"));
   assert.equal(mainRule.includes("overflow: auto"), false, "内容列不再自建滚动区，滚动交给宿主");
 });
+
+test("电路设计页能看布线工整度（S227）", () => {
+  const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
+  assert.ok(source.includes("function useRouting("), "工整度要走自己的 hook");
+  assert.ok(source.includes("ecad/routing?projectDir="), "工整度要从 /ecad/routing 拉");
+  assert.ok(source.includes("\"布线工整度\""), "页面上要有这一块");
+  assert.ok(source.includes("useRouting(projectDir)"), "面板里要真的调用");
+});

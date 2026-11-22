@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { readRouting } from "../lib/engine/ecad/pcb/routing.js";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -2999,4 +3000,32 @@ test("3D 实体：GLB 缓存键跟着板子与参数走，参数不同就不复�
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("布线工整度：直角、锐角、焊盘斜拉、单网多换孔各点一次，空板不炸（S227）", () => {
+  const dir = tempDir("ecad-routing-");
+  const file = join(dir, "board.kicad_pcb");
+  writeFileSync(
+    file,
+    "(kicad_pcb (version 20241229) (generator pcbnew)\n  (net 0 \"\")\n  (net 1 \"SIG_A\")\n  (net 2 \"SIG_B\")\n  (net 3 \"SIG_C\")\n  (footprint \"Resistor_SMD:R_0402_1005Metric\" (layer \"F.Cu\") (at 10 10)\n    (property \"Reference\" \"R1\")\n    (pad \"1\" smd roundrect (at 0 0) (size 2 0.6) (layers \"F.Cu\") (net 1 \"SIG_A\"))\n  )\n  (segment (start 10 10) (end 11.5 11.5) (width 0.2) (layer F.Cu) (net 1))\n  (segment (start 20 20) (end 25 20) (width 0.2) (layer F.Cu) (net 2))\n  (segment (start 25 20) (end 25 25) (width 0.2) (layer F.Cu) (net 2))\n  (segment (start 40 40) (end 45 40) (width 0.2) (layer F.Cu) (net 3))\n  (segment (start 45 40) (end 41 42) (width 0.2) (layer F.Cu) (net 3))\n  (via (at 60 60) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (net 3))\n  (via (at 62 60) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (net 3))\n  (via (at 64 60) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (net 3))\n)\n",
+    "utf8",
+  );
+  const report = readRouting(file);
+  assert.equal(report.ok, true, report.error);
+  assert.equal(report.stats.rightAngles >= 1, true, "20,20 处的直角要被抓到");
+  assert.equal(report.stats.acuteAngles >= 1, true, "45,40 处的回头要被抓到");
+  assert.equal(report.stats.badExits >= 1, true, "R1 脚上的 45° 引出要被抓到");
+  assert.equal(report.stats.heavyViaNets, 1, "同一信号网 3 个过孔要报一次");
+  const ids = new Set(report.findings.map((finding) => finding.id));
+  assert.equal(ids.has("routing.right-angle"), true);
+  assert.equal(ids.has("routing.acute-angle"), true);
+  assert.equal(ids.has("routing.pad-exit"), true);
+  assert.equal(ids.has("routing.via-count"), true);
+
+  const empty = join(dir, "empty.kicad_pcb");
+  writeFileSync(empty, "(kicad_pcb (version 20241229) (generator pcbnew)\n  (net 0 \"\")\n)", "utf8");
+  const bare = readRouting(empty);
+  assert.equal(bare.stats.tracks, 0);
+  assert.equal(bare.ok, true);
+  assert.equal(bare.notes.some((note) => note.includes("没有走线")), true);
 });

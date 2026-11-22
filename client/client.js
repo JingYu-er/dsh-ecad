@@ -1873,6 +1873,35 @@ function useLayoutCheck(projectDir) {
   return { layoutCheck: layoutCheck, error: error };
 }
 
+// 布线工整度（S227）：直角回头、连续短折、焊盘斜拉、单网过多换层——DRC 判不出来的那些。
+function useRouting(projectDir) {
+  const [routing, setRouting] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let closed = false;
+    if (typeof projectDir !== "string" || projectDir === "") {
+      setRouting(null);
+      setError("");
+      return () => {
+        closed = true;
+      };
+    }
+    callApi("GET", "ecad/routing?projectDir=" + encodeURIComponent(projectDir)).then((result) => {
+      if (closed) return;
+      if (result.ok) {
+        setRouting(result.value.routing);
+        setError("");
+      } else {
+        setError(result.error);
+      }
+    });
+    return () => {
+      closed = true;
+    };
+  }, [projectDir]);
+  return { routing: routing, error: error };
+}
+
 // 布线进阶体检（S165）：差分对长度差、平面层被信号割裂、去耦电容到负载引脚的距离。
 function useLinks(projectDir) {
   const [links, setLinks] = useState(null);
@@ -2462,6 +2491,7 @@ function EcadPanel(props) {
       const netgate = useNetGate(projectDir);
       const emc = useEmc(projectDir);
       const layoutCheck = useLayoutCheck(projectDir);
+      const routing = useRouting(projectDir);
       const links = useLinks(projectDir);
       const [gerberLayers, setGerberLayers] = useState("F_Cu,Edge_Cuts");
       // 3D 实体视图在客户端用 three 渲染，服务端这份只用来问「哪些器件没有 3D 模型」，
@@ -3045,6 +3075,36 @@ function EcadPanel(props) {
               }, (item.severity === "warning" ? "注意：" : "提示：") + item.message),
             ),
             linksView.error !== "" && linksView.ok ? e("div", { key: "links-error", style: { fontSize: "11px", color: "var(--dsw-alias-state-error-primary)" } }, linksView.error) : null,
+          ),
+        );
+      }
+
+      // 布线工整度（S227）：排在布局体检之前，一行计数——摆位看「有没有挪」，工整度看「线画得整不整」。
+      const routingView = routing.routing;
+      if (routingView !== null && routingView !== undefined) {
+        const stats = routingView.stats === undefined || routingView.stats === null ? {} : routingView.stats;
+        const warnings = (Array.isArray(routingView.findings) ? routingView.findings : []).filter((item) => item.severity !== "info").length;
+        rows.push(
+          e(
+            "div",
+            { key: "routing-view", style: { padding: "0 0 10px" } },
+            e(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px", padding: "4px 0 6px" } },
+              e("span", { style: Object.assign({}, D32_LABEL_MONO, { letterSpacing: "0.12em" }) }, "布线工整度"),
+              e("span", { style: { fontSize: "12px", opacity: 0.85 } },
+                routingView.ok
+                  ? String(stats.tracks === undefined ? 0 : stats.tracks) + " 段 · " + String(stats.nets === undefined ? 0 : stats.nets) + " 个网络"
+                  : routingView.error),
+              e("span", { style: { fontSize: "12px", opacity: 0.6 } },
+                routingView.ok
+                  ? "直角 " + String(stats.rightAngles === undefined ? 0 : stats.rightAngles)
+                    + " · 锐角 " + String(stats.acuteAngles === undefined ? 0 : stats.acuteAngles)
+                    + " · 阶梯 " + String(stats.stairRuns === undefined ? 0 : stats.stairRuns)
+                    + " · 斜拉 " + String(stats.badExits === undefined ? 0 : stats.badExits)
+                    + (warnings === 0 ? "" : " · " + String(warnings) + " 条待改")
+                  : ""),
+            ),
           ),
         );
       }

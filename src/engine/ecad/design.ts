@@ -17,6 +17,7 @@ import { mergeCoincidentPads } from "./padmerge.js";
 import { precheckFootprints } from "./padprecheck.js";
 import { assignNetIds, krtRoot, krtStatus, quoteLayerNames, runKrtAutoroute, runKrtConnectedCheck } from "./pcb/krt.js";
 import { readLayout } from "./pcb/layout-check.js";
+import { readRouting } from "./pcb/routing.js";
 import { countCopperLayers, druFloorForLayers, ensureDesignRules } from "./pcb/rules.js";
 import type { EcadToolchain } from "./toolchain.js";
 import { runTsciBuild, type EcadWorkspace } from "./tsci.js";
@@ -208,6 +209,30 @@ export async function runEcadDesign(request: DesignRequest): Promise<DesignResul
       // 再抬一次，DRC 才是按工艺下限判的（S149）。
       const again = ensureDesignRules(kicadDir, rules.floor);
       if (again.changed.length > 0) notes.push("布线器重写了网络类，已按同一档再次对齐：" + again.changed.join("、"));
+    }
+  }
+
+  // 4.6 布线工整度（S227）：DRC 只判间距与连通，判不出「直角回头、连续短折、焊盘斜拉」。
+  // 放在布线之后、DRC 之前：先让人看到线画得整不整，再看电气规则。
+  if (request.pcb === true && pcbFile !== "") {
+    started = Date.now();
+    const routing = readRouting(pcbFile);
+    const stats = routing.stats;
+    record(
+      "布线工整度",
+      routing.ok,
+      routing.ok
+        ? "直角 " + String(stats.rightAngles) + " / 锐角 " + String(stats.acuteAngles) + " / 阶梯 " + String(stats.stairRuns)
+          + " / 斜拉 " + String(stats.badExits)
+        : routing.error,
+      started,
+    );
+    if (routing.ok) {
+      const worst = routing.findings.filter((finding) => finding.severity !== "info").slice(0, 2);
+      for (const finding of worst) notes.push("布线：" + finding.message + " —— " + finding.fix);
+      if (stats.rightAngles + stats.acuteAngles + stats.stairRuns > 0) {
+        notes.push("布线工整度共 " + String(routing.findings.length) + " 条，完整清单用 stm32_pcb_routing 看。");
+      }
     }
   }
 

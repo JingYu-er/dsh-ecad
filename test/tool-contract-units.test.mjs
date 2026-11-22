@@ -43,6 +43,7 @@ const GOLDEN = [
   "stm32_pcb_ipc",
   "stm32_pcb_layout",
   "stm32_pcb_links",
+  "stm32_pcb_routing",
   "stm32_pcb_place",
   "stm32_pcb_render",
   "stm32_pcb_route",

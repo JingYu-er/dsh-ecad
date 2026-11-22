@@ -72,6 +72,7 @@ import { analyzeStackup, DEFAULT_TARGETS } from "./ecad/pcb/stackup.js";
 import { analyzeEmc } from "./ecad/pcb/emc.js";
 import { readEmcDeep } from "./ecad/pcb/emc-deep.js";
 import { readLayout } from "./ecad/pcb/layout-check.js";
+import { readRouting } from "./ecad/pcb/routing.js";
 import { readLinks } from "./ecad/pcb/links.js";
 import { editStorePath, readSchEdits, replaySchEditsTo, writeSchEdits } from "./schematic/edit.js";
 import { readGerberSet } from "./ecad/pcb/gerber.js";
@@ -335,6 +336,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/emc",
   WEB_API_PREFIX + "/ecad/links",
   WEB_API_PREFIX + "/ecad/layout-check",
+  WEB_API_PREFIX + "/ecad/routing",
   WEB_API_PREFIX + "/ecad/gerber",
   WEB_API_PREFIX + "/ecad/render3d",
   WEB_API_PREFIX + "/ecad/swap",
@@ -610,6 +612,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/emc" &&
     path !== WEB_API_PREFIX + "/ecad/links" &&
     path !== WEB_API_PREFIX + "/ecad/layout-check" &&
+    path !== WEB_API_PREFIX + "/ecad/routing" &&
     path !== WEB_API_PREFIX + "/ecad/gerber" &&
     path !== WEB_API_PREFIX + "/ecad/render3d" &&
     path !== WEB_API_PREFIX + "/ecad/swap" &&
@@ -1405,6 +1408,37 @@ export async function handleWebApi(input: {
         heightMm: report.heightMm,
         mcu: report.mcu,
         partCount: report.parts.length,
+        findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
+        notes: [...report.notes],
+      },
+    });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/routing") {
+    // 布线工整度体检（S227）：直角/锐角折返、连续短折、焊盘斜拉、单网过多换层。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const layout = resolveProjectLayout(projectDir);
+    const workspace = planEcadWorkspace(projectDir, layout.hardwareDir);
+    const latest = findLatestKicadBuild(workspace);
+    const emptyRouting = {
+      ok: false,
+      error: latest.ok ? "还没有 .kicad_pcb：先构建一次，或在 KiCad 里存一次板子。" : latest.error,
+      boardFile: "",
+      stats: { tracks: 0, nets: 0, rightAngles: 0, acuteAngles: 0, stairRuns: 0, badExits: 0, heavyViaNets: 0 },
+      findings: [] as Array<Record<string, unknown>>,
+      notes: [] as string[],
+    };
+    if (!latest.ok || latest.pcbFile === "") return ok({ routing: emptyRouting });
+    const report = readRouting(latest.pcbFile);
+    if (!report.ok) return ok({ routing: { ...emptyRouting, boardFile: latest.pcbFile, error: report.error } });
+    return ok({
+      routing: {
+        ok: true,
+        error: "",
+        boardFile: report.boardFile,
+        stats: report.stats,
         findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
         notes: [...report.notes],
       },

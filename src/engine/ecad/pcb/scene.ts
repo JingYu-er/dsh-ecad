@@ -35,6 +35,8 @@ export interface PcbPadView {
   readonly rotation: number;
   readonly shape: PcbPadShape;
   readonly side: PcbSide;
+  /** 网络名；未命名或读不到时为空串。 */
+  readonly net: string;
 }
 
 export interface PcbTrackView {
@@ -44,6 +46,7 @@ export interface PcbTrackView {
   readonly y2: number;
   readonly width: number;
   readonly side: PcbSide;
+  readonly net: string;
 }
 
 export interface PcbViaView {
@@ -51,6 +54,7 @@ export interface PcbViaView {
   readonly y: number;
   readonly size: number;
   readonly drill: number;
+  readonly net: string;
 }
 
 export interface PcbSilkLine {
@@ -88,6 +92,8 @@ export interface PcbScene {
   readonly tracks: readonly PcbTrackView[];
   /** 内层（In1.Cu 等）走线条数：预览不画，但要在说明里交代清楚。 */
   readonly innerTracks: number;
+  /** 圆弧段数：`arc` 目前按起止点当直线处理，工整度检查要说明这一点。 */
+  readonly arcs: number;
   readonly vias: readonly PcbViaView[];
   readonly zones: readonly PcbZoneView[];
   readonly refs: readonly PcbRefLabel[];
@@ -106,6 +112,7 @@ const EMPTY_SCENE = {
   pads: [] as PcbPadView[],
   tracks: [] as PcbTrackView[],
   innerTracks: 0,
+  arcs: 0,
   vias: [] as PcbViaView[],
   zones: [] as PcbZoneView[],
   refs: [] as PcbRefLabel[],
@@ -120,6 +127,21 @@ function rotate(dx: number, dy: number, degrees: number): PcbPoint {
   const cos = Math.cos(radians);
   const sin = Math.sin(radians);
   return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+}
+
+/**
+ * 焊盘与走线的网络有三种写法：`(net "GND")`、`(net 13)`、`(net 13 "GND")`。
+ * 数字形式要回查文件头的 `(net 13 "GND")` 声明表，否则只拿到一个编号。
+ */
+function netOf(node: SExprNode[] | null, names: ReadonlyMap<string, string>): string {
+  if (node === null) return "";
+  const first = node[1];
+  const second = node[2];
+  const head = typeof first === "string" ? first : "";
+  const tail = typeof second === "string" ? second : "";
+  if (head === "") return "";
+  if (!/^\d+$/u.test(head)) return head;
+  return tail === "" ? names.get(head) ?? "" : tail;
 }
 
 function pointOf(node: SExprNode[] | null): PcbPoint | null {
@@ -281,7 +303,7 @@ interface FootprintScan {
   readonly refs: PcbRefLabel[];
 }
 
-function scanFootprint(footprint: SExprNode[], fallbackRef: string): FootprintScan {
+function scanFootprint(footprint: SExprNode[], fallbackRef: string, netNames: ReadonlyMap<string, string>): FootprintScan {
   const at = atOf(childOf(footprint, "at"));
   const transform: Transform = { x: at.x, y: at.y, rotation: at.rotation };
   const footprintLayer = layerNameOf(childOf(footprint, "layer"));
@@ -312,6 +334,7 @@ function scanFootprint(footprint: SExprNode[], fallbackRef: string): FootprintSc
         rotation: transform.rotation + padAt.rotation,
         shape: padShapeOf(atomOf(item, 3)),
         side,
+        net: netOf(childOf(item, "net"), netNames),
       });
       continue;
     }
@@ -418,6 +441,14 @@ export function parsePcbScene(text: string, file: string): PcbScene {
   const zones: PcbZoneView[] = [];
   const refs: PcbRefLabel[] = [];
   const notes: string[] = [];
+  // 文件头的网络声明表：`(net 13 "GND")`。焊盘与走线里只写编号时要回查这里。
+  const netNames = new Map<string, string>();
+  for (const item of doc) {
+    if (!Array.isArray(item) || atomOf(item, 0) !== "net") continue;
+    const id = atomOf(item, 1);
+    const name = atomOf(item, 2);
+    if (id !== "" && name !== "" && /^\d+$/u.test(id)) netNames.set(id, name);
+  }
   let copperLayers = 0;
   let innerTracks = 0;
   let arcs = 0;
@@ -437,7 +468,7 @@ export function parsePcbScene(text: string, file: string): PcbScene {
     const head = atomOf(item, 0);
     if (head === "footprint" || head === "module") {
       footprintIndex += 1;
-      const scan = scanFootprint(item, "U" + String(footprintIndex));
+      const scan = scanFootprint(item, "U" + String(footprintIndex), netNames);
       pads.push(...scan.pads);
       silk.push(...scan.silk);
       refs.push(...scan.refs);
@@ -462,6 +493,7 @@ export function parsePcbScene(text: string, file: string): PcbScene {
         y2: end.y,
         width: Number.isFinite(width) ? width : 0.2,
         side,
+        net: netOf(childOf(item, "net"), netNames),
       });
       continue;
     }
@@ -475,6 +507,7 @@ export function parsePcbScene(text: string, file: string): PcbScene {
         y: at.y,
         size: Number.isFinite(size) ? size : 0.6,
         drill: Number.isFinite(drill) ? drill : 0.3,
+        net: netOf(childOf(item, "net"), netNames),
       });
       continue;
     }
@@ -547,6 +580,7 @@ export function parsePcbScene(text: string, file: string): PcbScene {
     pads,
     tracks,
     innerTracks,
+    arcs,
     vias,
     zones,
     refs,

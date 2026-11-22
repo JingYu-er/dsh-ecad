@@ -43,6 +43,7 @@ import { checkNetGate, netGateSummary } from "../engine/ecad/netgate.js";
 import { analyzeEmc, defaultCurrentForNet, requiredWidthMm } from "../engine/ecad/pcb/emc.js";
 import { readEmcDeep } from "../engine/ecad/pcb/emc-deep.js";
 import { readLayout } from "../engine/ecad/pcb/layout-check.js";
+import { readRouting } from "../engine/ecad/pcb/routing.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
 import { readGerberSet } from "../engine/ecad/pcb/gerber.js";
 import { collectBriefFacts, renderBrief, renderMrd, renderPrd, writeBriefs } from "../engine/ecad/brief.js";
@@ -68,6 +69,7 @@ export const PCB_EMC_TOOL = "stm32_emc";
 export const PCB_MECH_TOOL = "stm32_mech";
 export const PCB_LINKS_TOOL = "stm32_pcb_links";
 export const PCB_LAYOUT_TOOL = "stm32_pcb_layout";
+export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
 export const PCB_GERBER_TOOL = "stm32_pcb_gerber";
 
 const output: JsonSchema = {
@@ -2364,6 +2366,134 @@ export function registerPcbTools(ctx: DshContext): void {
   ctx.tools.register(linksTool);
   ctx.tools.register(gerberTool);
   ctx.tools.register(impedanceTool);
+
+  const routingOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      boardFile: { type: "string" },
+      stats: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          tracks: { type: "number" },
+          nets: { type: "number" },
+          rightAngles: { type: "number" },
+          acuteAngles: { type: "number" },
+          stairRuns: { type: "number" },
+          badExits: { type: "number" },
+          heavyViaNets: { type: "number" },
+        },
+        required: ["tracks", "nets", "rightAngles", "acuteAngles", "stairRuns", "badExits", "heavyViaNets"],
+      },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            severity: { type: "string" },
+            message: { type: "string" },
+            fix: { type: "string" },
+            net: { type: "string" },
+            refs: { type: "array", items: { type: "string" } },
+          },
+          required: ["id", "severity", "message", "fix", "net", "refs"],
+        },
+      },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "boardFile", "stats", "findings", "notes"],
+  };
+
+  const routingTool: ToolDefinition = {
+    name: PCB_ROUTING_TOOL,
+    description:
+      "布线工整度体检：直角与锐角折返、连续短折（阶梯碎折）、焊盘斜向引出、单网过多换层。只看画得出的铜层，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        maxViasPerNet: { type: "number", description: "单网过孔数上限（只对非电源网络），默认 2。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: routingOutput,
+      render: (_args, value) => {
+        const result = value as {
+          ok: boolean;
+          error: string;
+          stats: { tracks: number; nets: number; rightAngles: number; acuteAngles: number; stairRuns: number; badExits: number; heavyViaNets: number };
+          findings: { severity: string; message: string; fix: string }[];
+          notes: string[];
+        };
+        if (!result.ok) return [{ type: "text", text: "布线体检失败：" + result.error }];
+        const stats = result.stats;
+        const lines: string[] = [
+          "布线体检：" + String(stats.tracks) + " 段 · " + String(stats.nets) + " 个网络 · 直角 "
+            + String(stats.rightAngles) + " · 锐角 " + String(stats.acuteAngles) + " · 阶梯碎折 "
+            + String(stats.stairRuns) + " · 焊盘斜拉 " + String(stats.badExits) + " · 多换层网 "
+            + String(stats.heavyViaNets),
+        ];
+        const label: Record<string, string> = { error: "错误", warning: "告警", info: "提示" };
+        const shown = result.findings.slice(0, 8);
+        for (const finding of shown) lines.push((label[finding.severity] ?? finding.severity) + "：" + finding.message + " → " + finding.fix);
+        if (result.findings.length > shown.length) lines.push("…还有 " + String(result.findings.length - shown.length) + " 条");
+        for (const note of result.notes) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; boardFile?: string; maxViasPerNet?: number }, exec: ToolExec) => {
+      const empty = {
+        ok: false,
+        error: "",
+        boardFile: "",
+        stats: { tracks: 0, nets: 0, rightAngles: 0, acuteAngles: 0, stairRuns: 0, badExits: 0, heavyViaNets: 0 },
+        findings: [] as Array<Record<string, unknown>>,
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") {
+        boardFile = resolve(resolved.projectDir, args.boardFile);
+      } else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
+      const report = readRouting(boardFile, {
+        ...(typeof args.maxViasPerNet === "number" ? { maxViasPerNet: args.maxViasPerNet } : {}),
+      });
+      if (!report.ok) return { ...empty, boardFile, error: report.error };
+      return {
+        ok: true,
+        error: "",
+        boardFile: report.boardFile,
+        stats: report.stats,
+        findings: report.findings.map((finding) => ({
+          id: finding.id,
+          severity: finding.severity,
+          message: finding.message,
+          fix: finding.fix,
+          net: finding.net,
+          refs: [...finding.refs],
+        })),
+        notes: [...report.notes],
+      };
+    },
+  };
+  ctx.tools.register(routingTool);
 
   const render3dOutput: JsonSchema = {
     type: "object",
