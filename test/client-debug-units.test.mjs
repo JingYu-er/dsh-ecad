@@ -167,7 +167,7 @@ test("电路设计页签：读 /ecad 并给出下一步动作（S99）", () => {
   assert.equal(source.includes("function useEcad("), true);
   assert.equal(source.includes("function EcadPanel("), true);
   assert.equal(source.includes('callApi("GET", "ecad?projectDir="'), true);
-  assert.equal(source.includes('tabButton("ecad", DEBUG_LABELS.ecad)'), true);
+  assert.equal(source.includes('navItem("ecad", DEBUG_LABELS.ecad)'), true);
   assert.equal(source.includes('tab === "ecad"'), true);
   assert.match(source, /stm32_ecad_init/u);
   assert.match(source, /ecad\/action/u);
@@ -416,12 +416,12 @@ test("面板顶部按瑞士风骨架排：eyebrow、大标题、副句、四格�
   const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(/e\(\s*"header"/u.test(source), "报头要是 header 元素");
   assert.ok(source.includes("[ 硬件台 ]"), "eyebrow 要带方括号标签");
-  assert.ok(source.includes('e("h1", { style: debugStyles.title }, "硬件台")'), "要有 h1 大标题");
+  assert.ok(source.includes('e("h1", { style: debugStyles.title }, props.page)'), "要有随页签的大标题");
   assert.ok(source.includes("debugStyles.lead"), "要有副句");
   assert.ok(source.includes("d32-stat"), "统计格要有 d32-stat 类");
   assert.ok(source.includes('statCell("连接"'), "统计第一格是连接状态");
   assert.ok(source.includes('statCell("证据目录"'), "统计最后一格是证据目录");
-  assert.ok(source.includes('fontSize: "34px"'), "大标题 34px");
+  assert.ok(source.includes('fontSize: "28px"'), "大标题 28px");
   assert.ok(source.includes("repeat(4, minmax(0, 1fr))"), "统计条四等分");
   // 空态是人话，不是等宽大写标签。
   const emptyBlock = source.slice(source.indexOf("      empty: {"), source.indexOf("      mono:"));

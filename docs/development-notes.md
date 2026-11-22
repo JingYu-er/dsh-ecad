@@ -6062,7 +6062,26 @@ DSH 0.2.2-rc.1 把工具 JSON Schema 压成固定子集，违规在**注册期**
 - **能力矩阵要能表达「能烧但不能调」**：一个布尔 `flash` 会把 CubeProgrammer 和 OpenOCD 混为一谈，最终给出错误建议。
 - **诊断里的「成功」必须来自被诊断对象**：spawn 成功、文件存在、进程退出 0，都不是「页面已打开」或「驱动已装好」。
 
-## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S220）
+## §92 硬件台：事件总线、SSE 与停靠网格（2026-11，S1–S223）
+
+### 二百二十七、页签挪到左边，里面也要重新排（S223）
+
+判断：S220 只换了报头——一行 eyebrow、一个大标题、四格统计，页签仍是顶上一条文字；用户看到的是「大框换新了、小框里还是旧的」。要按歸藏设计的骨架，左侧必须有常驻导航，内容区才有位置做卡片与表格。
+
+取证（`~/.dsh/profiles/desktop/node_modules/dsh-guizang-design/gallery/style.css`）：`.shell` 是 `216px minmax(0,1fr)` 两列；`.rail` sticky 全高、`padding:24px 12px`、右侧 1px 线；导航项 `.nav a` 高 34px、`padding:0 8px`、hover 换 `--grey-1`、选中 `.on` 是**墨底纸字**；分组标题是 mono 11px/0.1em 大写；`.main` 内边距 `32px 48px 96px`、`max-width:1180px`；卡片 1px 细线、hover 换墨色边；空态是虚线框。
+
+落地（两个插件同构）：
+- `debugStyles` 增 `page: { display:grid, gridTemplateColumns:"176px minmax(0,1fr)" }`、`rail`（sticky、`padding:20px 12px`、右侧 1px 线）、`brandBlock/brandName/brandSub`、`navGroup/navGroupLabel`、`navItem/navItemOn`（选中背景 `var(--dsw-alias-label-primary)`、文字 `var(--dsw-alias-bg-layer-1)`）、`main`（`padding:20px 24px 32px`、`max-width:960px`）、`card/cardHead/cardKicker/cardTitle/cardNote/cardRow`、`table/tableHead/tableCell`、`empty`。
+- 页签条整条撤掉，改右侧导航两组：硬件台是「会话」（概览、事件、故障）与「硬件」（流程图、电路设计）；调试台是「会话」（概览、事件、实时通道、故障）与「目标」（引脚、时钟、中断、产物、变更）。
+- 大标题改成跟着当前页走（`StatusBar` 收 `page`/`pageKey`，`PAGE_LEADS` 给每页副句），字号 34→28px，把高度让给内容。
+
+两处结构坑（都是一次编译就过、测试才炸出来的）：
+1. `tab` 状态原本在 `Channels` 里，而页面外壳（`StatusBar`、rail、`d32-page`）在 `DebugConsole` 里——rail 写在 `Channels` 会报 `ReferenceError: rail is not defined`。修法是把 `tab`/`setTab` 提升到 `DebugConsole`，`Channels` 改收 props；失败角标同理，`unseenFails` 在 `DebugConsole` 里按 `events` 重算。
+2. `Channels` 的返回里原来还带着 `header`（旧页签条），rail 一接管就必须删掉，否则是 `header is not defined`。
+
+验收：调试台 1175 pass / 包体 2293.6 KB / 385 文件；硬件台 320 pass / 817.8 KB / 182 文件；两仓 `tsc --noEmit` 与 `npm run build` 均通过。
+
+教训：换骨架不是换配色——「大框换了」之后必须把内容区也拆成 rail + main，否则页签条还占着顶部，里面永远排不像。
 
 ### 二百二十六、先排报头，再谈配色（S220）
 
