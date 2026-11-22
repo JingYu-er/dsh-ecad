@@ -5,6 +5,7 @@
  */
 
 import assert from "node:assert/strict";
+import { coverageOf } from "../lib/engine/ecad/pcb/coverage.js";
 import { readRouting } from "../lib/engine/ecad/pcb/routing.js";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3028,4 +3029,19 @@ test("布线工整度：直角、锐角、焊盘斜拉、单网多换孔各点�
   assert.equal(bare.stats.tracks, 0);
   assert.equal(bare.ok, true);
   assert.equal(bare.notes.some((note) => note.includes("没有走线")), true);
+});
+
+test("覆盖记录：每层做了什么按最终板子数，空层与未填充都点出来（S228）", () => {
+  const report = coverageOf("(kicad_pcb (version 20241229) (generator pcbnew)\n  (layers \"F.Cu\" \"In1.Cu\" \"In2.Cu\" \"B.Cu\")\n  (net 0 \"\")\n  (net 1 \"GND\")\n  (segment (start 0 0) (end 10 0) (width 0.2) (layer F.Cu) (net 1))\n  (segment (start 0 5) (end 10 5) (width 0.2) (layer B.Cu) (net 1))\n  (zone (net 1) (net_name \"GND\") (layer \"In1.Cu\") (hatch edge 0.5)\n    (filled_polygon (layer \"In1.Cu\") (pts (xy 0 0) (xy 10 0) (xy 10 10)))\n  )\n  (zone (net 1) (net_name \"GND\") (layer \"In2.Cu\") (hatch edge 0.5)\n  )\n)\n");
+  assert.equal(report.summary.copper, 4);
+  const byName = new Map(report.layers.map((layer) => [layer.name, layer]));
+  assert.equal(byName.get("F.Cu").tracks, 1);
+  assert.equal(byName.get("F.Cu").zones, 0);
+  assert.equal(byName.get("F.Cu").state, "只有信号");
+  assert.equal(byName.get("In1.Cu").role, "内层平面");
+  assert.equal(byName.get("In1.Cu").state, "铺铜已填充");
+  assert.equal(byName.get("In2.Cu").state, "铺铜未填充");
+  assert.equal(report.summary.planeLayers, 2);
+  assert.equal(report.summary.signalLayers, 2);
+  assert.equal(report.summary.emptyLayers, 0);
 });

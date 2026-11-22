@@ -19,7 +19,7 @@ const CRC_TABLE = (() => {
   return table;
 })();
 
-function crc32(data: Buffer): number {
+export function crc32(data: Buffer): number {
   let value = 0xffffffff;
   for (let index = 0; index < data.length; index += 1) {
     value = (CRC_TABLE[(value ^ (data[index] ?? 0)) & 0xff] ?? 0) ^ (value >>> 8);

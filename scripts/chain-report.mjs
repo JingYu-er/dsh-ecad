@@ -24,6 +24,7 @@ import { buildApplyScript, parseApplyOutput } from "../lib/engine/ecad/pcb/apply
 import { planDecapMoves } from "../lib/engine/ecad/pcb/decap-place.js";
 import { defaultSchematicFile } from "../lib/engine/ecad/pcb/layout-check.js";
 import { readPcbScene } from "../lib/engine/ecad/pcb/scene.js";
+import { coverageOf } from "../lib/engine/ecad/pcb/coverage.js";
 import {
   copperLayersOf,
   effectiveRouteSpec,
@@ -152,6 +153,7 @@ function countTracks(text) {
 function countVias(text) {
   return (text.match(/\(via\s/gu) ?? []).length;
 }
+
 
 function findingCounts(summary) {
   const counts = {};
@@ -388,6 +390,10 @@ async function main() {
     reportPath: drc.reportPath,
   };
 
+  // 覆盖记录（S228）：按铜层记「这一层做了什么」，交付前一眼能看出哪层是空的。
+  // 依据是最终板子本身：走线数、铺铜区数、是否填充过，不看中间步骤的日志。
+  report.coverage = coverageOf(readFileSync(filledFile, "utf8"));
+
   report.finalBoard = filledFile;
   report.ok = drc.ok;
   const outFile = options.out === "" ? join(work, "chain-report.json") : options.out;
@@ -409,6 +415,9 @@ async function main() {
       (routeReport.clearanceShortfall ? "（降档）" : ""),
   );
   line("铺铜", `${report.steps.fill.zones} 区 / ${report.steps.fill.filled ? "已填充" : "未填充"}`);
+  for (const layer of report.coverage.layers) {
+    line("层 " + layer.name, layer.role + " · " + layer.state + "（走线 " + String(layer.tracks) + " · 铺铜 " + String(layer.zones) + "）");
+  }
   line("DRC", `${report.steps.drc.errors} 错误 / ${report.steps.drc.warnings} 警告 / 未连接 ${report.steps.drc.unconnected}`);
   for (const note of report.notes) console.log("  · " + note);
   console.log("报告：" + outFile);
