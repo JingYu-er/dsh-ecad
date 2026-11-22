@@ -73,6 +73,7 @@ import { analyzeEmc } from "./ecad/pcb/emc.js";
 import { readEmcDeep } from "./ecad/pcb/emc-deep.js";
 import { readLayout } from "./ecad/pcb/layout-check.js";
 import { readRouting } from "./ecad/pcb/routing.js";
+import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
 import { readLinks } from "./ecad/pcb/links.js";
 import { editStorePath, readSchEdits, replaySchEditsTo, writeSchEdits } from "./schematic/edit.js";
 import { readGerberSet } from "./ecad/pcb/gerber.js";
@@ -337,6 +338,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/links",
   WEB_API_PREFIX + "/ecad/layout-check",
   WEB_API_PREFIX + "/ecad/routing",
+  WEB_API_PREFIX + "/ecad/verify-bundle",
   WEB_API_PREFIX + "/ecad/gerber",
   WEB_API_PREFIX + "/ecad/render3d",
   WEB_API_PREFIX + "/ecad/swap",
@@ -613,6 +615,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/links" &&
     path !== WEB_API_PREFIX + "/ecad/layout-check" &&
     path !== WEB_API_PREFIX + "/ecad/routing" &&
+    path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
     path !== WEB_API_PREFIX + "/ecad/gerber" &&
     path !== WEB_API_PREFIX + "/ecad/render3d" &&
     path !== WEB_API_PREFIX + "/ecad/swap" &&
@@ -1440,6 +1443,42 @@ export async function handleWebApi(input: {
         boardFile: report.boardFile,
         stats: report.stats,
         findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
+        notes: [...report.notes],
+      },
+    });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/verify-bundle") {
+    // 交付包身份复核（S229）：GET 只读，核对成员路径、重名、CRC、sha256 与清单。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const asked = typeof query["zipFile"] === "string" ? query["zipFile"].trim() : "";
+    let file = asked;
+    if (file === "") {
+      const workspace = planEcadWorkspace(projectDir, resolveProjectLayout(projectDir).hardwareDir);
+      const newest = newestBundleFile(workspace.outDir);
+      if (newest === "") {
+        return ok({
+          verifyBundle: {
+            ...EMPTY_BUNDLE,
+            error: "out 目录里还没有整包 zip：先跑 stm32_ecad_export 并给 bundle: true",
+          },
+        });
+      }
+      file = newest;
+    }
+    const report = verifyBundle(file);
+    return ok({
+      verifyBundle: {
+        ok: report.ok,
+        error: report.error,
+        file: report.file,
+        bytes: report.bytes,
+        memberCount: report.members.length,
+        manifestFirst: report.manifestFirst,
+        manifestLines: report.manifestLines,
+        problems: report.problems.map((item) => ({ ...item })),
         notes: [...report.notes],
       },
     });
@@ -2387,4 +2426,25 @@ export function openEventStream(
     request.on("error", stop);
   }
   return stop;
+}
+
+/** 取目录里最新的整包 zip；没有就回空串。 */
+function newestBundleFile(dir: string): string {
+  try {
+    const names = readdirSync(dir).filter((name) => name.toLowerCase().endsWith(".zip"));
+    if (names.length === 0) return "";
+    let best = "";
+    let bestAt = 0;
+    for (const name of names) {
+      const full = join(dir, name);
+      const at = statSync(full).mtimeMs;
+      if (at > bestAt) {
+        bestAt = at;
+        best = full;
+      }
+    }
+    return best;
+  } catch {
+    return "";
+  }
 }

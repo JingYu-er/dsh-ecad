@@ -59,7 +59,7 @@ dsh plugin --profile desktop add dsh-ecad
 
 `dsh-ecad` 不猜器件：`index.circuit.tsx` 里的 `jlcpcb:C<编号>` 决定 BOM 料号，封装名决定 PCB 封装；缺封装时 `stm32_part_import` 从 KiCad 官方库复制，库里没有才回退立创页面转换，两条都失败会同时给出两个原因。
 
-## 工具参考（44 个）
+## 工具参考（45 个）
 
 ### 工程与构建
 
@@ -111,6 +111,7 @@ dsh plugin --profile desktop add dsh-ecad
 | `stm32_emc` | 载流线宽（IPC-2221）、铺铜、回流路径、串扰、差分间距 |
 | `stm32_pcb_links` | 布线体检：差分对长度差、平面层上的信号、去耦电容到引脚距离 |
 | `stm32_pcb_layout` | 布局体检：去耦离电源脚、晶振离主控、接口贴边、主控留白、电源入口路径 |
+| `stm32_ecad_verify` | 交付包身份复核：路径、重名、CRC/sha256、清单首项与计数 |
 | `stm32_pcb_routing` | 布线工整度：直角与锐角折返、连续短折、焊盘斜向引出、单网过多换层 |
 | `stm32_power` | 功耗与电源树电流预算（只合计填的电流，估算单列） |
 | `stm32_bom` | BOM 分组与元件成本；`prices: true` 才联网取立创报价 |
