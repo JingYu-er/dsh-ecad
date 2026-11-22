@@ -411,3 +411,19 @@ test("电路设计页能看布局体检：去耦/晶振/接口三类问题都在
   assert.ok(source.includes("stm32_pcb_layout"), "超出时要指向工具");
   assert.ok(source.indexOf("function useLayoutCheck(") < source.indexOf("function EcadPanel("), "hook 要定义在面板之前");
 });
+
+test("面板顶部按瑞士风骨架排：eyebrow、大标题、副句、四格统计（S220）", () => {
+  const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
+  assert.ok(/e\(\s*"header"/u.test(source), "报头要是 header 元素");
+  assert.ok(source.includes("[ 硬件台 ]"), "eyebrow 要带方括号标签");
+  assert.ok(source.includes('e("h1", { style: debugStyles.title }, "硬件台")'), "要有 h1 大标题");
+  assert.ok(source.includes("debugStyles.lead"), "要有副句");
+  assert.ok(source.includes("d32-stat"), "统计格要有 d32-stat 类");
+  assert.ok(source.includes('statCell("连接"'), "统计第一格是连接状态");
+  assert.ok(source.includes('statCell("证据目录"'), "统计最后一格是证据目录");
+  assert.ok(source.includes('fontSize: "34px"'), "大标题 34px");
+  assert.ok(source.includes("repeat(4, minmax(0, 1fr))"), "统计条四等分");
+  // 空态是人话，不是等宽大写标签。
+  const emptyBlock = source.slice(source.indexOf("      empty: {"), source.indexOf("      mono:"));
+  assert.equal(emptyBlock.includes("D32_FONT_CODE"), false, "空态不该用等宽字体");
+});
