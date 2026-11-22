@@ -4583,11 +4583,8 @@ function EcadPanel(props) {
       // 页签内容各自兜底：某一页渲染出错时只把这一页换成错误说明，
       // 标签条与其它页签仍然可用（「点一下整片空白」就是从前的表现）。
       const guardedBody = e(PanelBoundary, { key: "body" }, ...body);
-      return e(
-        DebugPanel,
-        { title: DEBUG_LABELS[tab] ?? tab, onCollapse: props.onCollapse },
-        guardedBody,
-      );
+      // 内容直接铺在页面里：导航在左侧，这一层不再需要标题条与折叠按钮（S223）。
+      return e("div", { className: "d32-body", style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } }, guardedBody);
     }
 
     /** 底部控制台：把当前可见事件按行铺开，便于一眼扫过整段联调。 */
@@ -5111,13 +5108,6 @@ function EcadPanel(props) {
       const panels = [];
       if (collapsed.channels !== true) {
         panels.push(
-          e("div", {
-            key: "divider-right",
-            style: debugStyles.divider,
-            onPointerDown: startDrag("right"),
-            title: "拖动改宽；双击恢复默认",
-            onDoubleClick: () => updateLayout({ right: 300 }),
-          }),
           e(Channels, {
             key: "channels",
             tab: tab,
@@ -5140,7 +5130,7 @@ function EcadPanel(props) {
               setFocusFailures((previous) => previous + 1);
             },
             onCollapse: () => updateLayout({ collapsed: Object.assign({}, collapsed, { channels: true }) }),
-            flex: "0 0 " + String(layout.right) + "px",
+            flex: "1 1 auto",
           }),
         );
       }
