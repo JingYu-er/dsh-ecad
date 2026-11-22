@@ -3339,7 +3339,7 @@ function EcadPanel(props) {
               powerView.inputA > 0 ? e("span", { style: { fontSize: "12px", opacity: 0.6 } }, "输入 " + String(powerView.inputV) + " V ≈ " + String(powerView.inputA) + " A") : null,
               powerView.unfilled > 0 ? e("span", { style: { fontSize: "12px", color: D32_WARN } }, String(powerView.unfilled) + " 个未填电流") : null,
             ),
-            ...rails.slice(0, 6).map((rail, index) =>
+            ...rails.filter((rail) => !rail.known || rail.ok === false).slice(0, 4).map((rail, index) =>
               e("div", {
                 key: "power-" + String(index),
                 style: { fontSize: "12px", opacity: 0.85, padding: "1px 0", fontFamily: D32_FONT_CODE, color: rail.known && rail.ok === false ? "var(--dsw-alias-state-warn-primary)" : "inherit" },
@@ -3349,7 +3349,7 @@ function EcadPanel(props) {
                 " · 最窄 " + String(rail.minTrackMm) + " / 需 " + String(rail.requiredMm) + " mm" +
                 (rail.known ? (rail.ok ? "（够）" : "（偏窄）") : "（待定）")),
             ),
-            rails.length > 6 ? e("div", { key: "power-more", style: { fontSize: "11px", opacity: 0.6 } }, "还有 " + String(rails.length - 6) + " 个网络，用 stm32_power 看全量") : null,
+
             powerView.notes.length > 0 ? e("div", { key: "power-notes", style: { fontSize: "11px", opacity: 0.6, padding: "4px 0 0" } }, powerView.notes.join("；")) : null,
           ),
         );
@@ -3418,61 +3418,29 @@ function EcadPanel(props) {
                     ),
                   ))
               : null,
-            job.name === "route-own" && Array.isArray(outcome.notes) && outcome.notes.length > 0
-              ? e(
-                  "div",
-                  { key: "route-notes", style: { display: "grid", gap: "2px", opacity: 0.8 } },
-                  ...outcome.notes.slice(0, 8).map((note, index) => e("div", { key: "route-note-" + String(index) }, note)),
-                )
-              : null,
             outcome.dfm !== undefined && outcome.dfm !== null
               ? e("div", { key: "dfm-line", style: { opacity: 0.85 } },
                   "板 " + String(outcome.dfm.widthMm) + "×" + String(outcome.dfm.heightMm) + " mm · " + String(outcome.dfm.layers) + " 层 · 最细走线 " + String(outcome.dfm.minTrackMm) + " mm · 打样约 " + String(outcome.dfm.approxCny) + " 元",
                   Array.isArray(outcome.dfm.surcharges) && outcome.dfm.surcharges.length > 0 ? "（加价项 " + String(outcome.dfm.surcharges.length) + " 条）" : "")
               : null,
-            outcome.dfm !== undefined && outcome.dfm !== null && Array.isArray(outcome.dfm.findings)
-              ? [...outcome.dfm.findings.slice(0, 6).map((item, index) =>
-                  e("div", { key: "dfm-" + String(index), style: { display: "flex", gap: "8px", alignItems: "baseline" } },
-                    e("span", { style: Object.assign({}, D32_LABEL_MONO, { color: item.severity === "error" ? "var(--dsw-alias-state-error-primary)" : D32_WARN }) }, item.severity === "error" ? "DFM" : "DFM"),
-                    e("span", { style: { opacity: 0.75 } }, item.rule),
-                    e("span", null, item.message + " → " + item.fix),
-                  ),
-                )]
-              : [],
-            ...findings.slice(0, 12).map((item, index) =>
+            ...findings.slice(0, 4).map((item, index) =>
               e("div", { key: "finding-" + String(index), style: { display: "flex", gap: "8px", alignItems: "baseline" } },
                 e("span", { style: Object.assign({}, D32_LABEL_MONO, { color: item.severity === "error" ? "var(--dsw-alias-state-error-primary)" : D32_WARN }) }, item.severity === "error" ? "ERROR" : "WARN"),
                 e("span", { style: { opacity: 0.75 } }, item.rule),
                 e("span", null, item.message),
               ),
             ),
-            ...artifacts.slice(0, 12).map((item, index) =>
-              e("div", { key: "artifact-" + String(index), style: { opacity: 0.8 } }, item.name + (item.bytes > 0 ? " · " + sizeText(item.bytes) : "")),
-            ),
-            ...(Array.isArray(outcome.notes) ? outcome.notes.slice(0, 4).map((text, index) => e("div", { key: "note-" + String(index), style: { opacity: 0.7 } }, text)) : []),
+            artifacts.length > 0 ? e("div", { style: { opacity: 0.7 } }, "产物 " + String(artifacts.length) + " 个：" + artifacts.slice(0, 3).map((item) => item.name).join("、") + (artifacts.length > 3 ? "…" : "")) : null,
           ),
         );
       }
       if (ecad !== null && ecad.workspace !== undefined) {
-        rows.push(
-          e(
-            "div",
-            { key: "paths", style: { padding: "2px 0 8px", fontSize: "11.5px", opacity: 0.8, display: "grid", gap: "2px" } },
-            e("div", null, "tscircuit：" + ecad.workspace.circuitDir),
-            e("div", null, "KiCad 工程：" + ecad.workspace.kicadDir),
-            e("div", null, "库：" + ecad.workspace.libsDir),
-            e("div", null, "导出：" + ecad.workspace.outDir),
-          ),
-        );
         if (!ecad.initialized) {
           rows.push(e("div", { key: "hint-init", style: { padding: "4px 0", fontSize: "12px" } }, "下一步：调用 stm32_ecad_init 建工作区，再在 circuit/ 里写 .circuit.tsx。"));
         } else if (!ecad.installed) {
           rows.push(e("div", { key: "hint-install", style: { padding: "4px 0", fontSize: "12px" } }, "下一步：在 " + ecad.workspace.circuitDir + " 执行 npm install（约 730 MB），之后调用 stm32_ecad_build。"));
         } else if (entries.length === 0) {
           rows.push(e("div", { key: "hint-entry", style: { padding: "4px 0", fontSize: "12px" } }, "下一步：在 circuit/ 里新建 .circuit.tsx，再调用 stm32_ecad_build。"));
-        }
-        if (entries.length > 0) {
-          rows.push(e("div", { key: "entries", style: { padding: "2px 0 6px", fontSize: "12px" } }, "入口：" + entries.join("、")));
         }
         rows.push(
           e(
@@ -3481,15 +3449,6 @@ function EcadPanel(props) {
             latest !== null && latest.ok
               ? "KiCad 工程：" + (typeof latest.schematicFile === "string" ? latest.schematicFile.split(/[\\/]/u).pop() : "") + " / " + (typeof latest.pcbFile === "string" ? latest.pcbFile.split(/[\\/]/u).pop() : "")
               : "最近构建：" + (latest !== null && typeof latest.error === "string" && latest.error !== "" ? latest.error : "无"),
-          ),
-        );
-        rows.push(
-          e(
-            "div",
-            { key: "steps", style: { padding: "2px 0 0", fontSize: "12px", display: "grid", gap: "2px" } },
-            ...(steps.length === 0
-              ? [e("div", { key: "no-step", style: { opacity: 0.6 } }, "还没有导出 STEP：调用 stm32_ecad_step 生成。")]
-              : steps.map((item, index) => e("div", { key: "step-" + String(index) }, item.name + "（" + sizeText(item.bytes) + "）"))),
           ),
         );
       }
@@ -3570,15 +3529,8 @@ function EcadPanel(props) {
             e("span", null, schematic.mcu === null || schematic.mcu === undefined ? "未识别主控" : schematic.mcu.value + "（" + schematic.mcu.ref + "）"),
             e("span", null, "元件 " + String(countOf(schematic.components))),
             e("span", null, "网络 " + String(countOf(schematic.nets))),
-            e("span", null, schematic.generator === "" ? "KiCad" : schematic.generator),
-            e(
-              "span",
-              { style: { opacity: 0.7 }, title: "工程约定：程序在 program/ 或 firmware/，KiCad 在 hardware/；具体位置见 dsh-stm32.conf" },
-              "硬件 " + hardwareNameOf(schematic.layout),
-            ),
             e("span", { style: errors.length > 0 ? { color: "var(--dsw-alias-state-error-primary)" } : {} }, "错误 " + String(errors.length)),
             e("span", { style: warnings.length > 0 ? { color: D32_WARN } : {} }, "提示 " + String(warnings.length)),
-            e("span", { style: { opacity: 0.55 }, title: "只读：本页不改原理图，也不改工程配置（流程图由原理图派生）" }, "只读"),
           ),
         );
       }
@@ -3666,8 +3618,8 @@ function EcadPanel(props) {
                 e(
                   "div",
                   { key: item.rule + "|" + item.message, className: "d32-sch-finding", style: { display: "flex", gap: "10px", fontSize: "12px", padding: "3px 0" } },
-                  e("span", { style: { width: "190px", flex: "0 0 auto", fontFamily: D32_FONT_CODE, fontSize: "10.5px", letterSpacing: "0.06em", color: item.severity === "error" ? "var(--dsw-alias-state-error-primary)" : item.severity === "warning" ? D32_WARN : "var(--dsw-alias-label-tertiary)" } }, item.rule),
-                  e("span", { style: { opacity: item.severity === "info" ? 0.7 : 0.95 } }, item.message),
+                  e("span", { style: { width: "132px", flex: "0 0 auto", fontFamily: D32_FONT_CODE, fontSize: "10.5px", letterSpacing: "0.06em", color: item.severity === "error" ? "var(--dsw-alias-state-error-primary)" : item.severity === "warning" ? D32_WARN : "var(--dsw-alias-label-tertiary)" } }, item.rule),
+                  e("span", { style: { flex: "1 1 auto", minWidth: 0, lineHeight: 1.6, opacity: item.severity === "info" ? 0.7 : 0.95 } }, item.message),
                 ),
               ),
               findings.length > shown.length
@@ -3681,7 +3633,7 @@ function EcadPanel(props) {
           notes.push(e("div", { key: "warn", style: { paddingTop: "6px", fontSize: "11.5px", opacity: 0.65 } }, warnList.join("；")));
         }
       }
-      return e("div", { className: "d32-page", style: { display: "flex", flexDirection: "column", gap: "4px" } }, head, ...reviewRows, diagram, ...notes);
+      return e("div", { style: { display: "flex", flexDirection: "column", gap: "10px", minWidth: 0 } }, head, ...reviewRows, diagram, ...notes);
     }
 
     /** 中断表：读 .ioc 的 NVIC.*，只显示使能状态与两级优先级。 */
@@ -4531,45 +4483,13 @@ function EcadPanel(props) {
           return next;
         });
       };
-      /* 未读失败角标（S65）：停在别的标签时也能看见又有几条失败。 */
-      const failCount = props.events.filter((item) => item.status === "fail").length;
-      const [failSeen, setFailSeen] = useState(0);
-      useEffect(() => {
-        if (tab === "faults") setFailSeen(failCount);
-      }, [tab, failCount]);
       const body =
         tab === "overview"
-          ? [e(OverviewPanel, { key: "overview", projectDir: projectDir, debug: debugInfo.debug, events: props.events, onShowFailures: props.onShowFailures, onShowChannels: () => setTab("events") })]
-          : tab === "events"
-          ? [
-              e(
-                "div",
-                {
-                  key: "events",
-                  className: "d32-events",
-                  style: { display: "flex", alignItems: "stretch", gap: "0", minHeight: "480px", height: "100%" },
-                },
-                e(Timeline, {
-                  key: "timeline",
-                  events: props.events,
-                  durations: props.durations,
-                  connection: props.connection,
-                  selectedSeq: props.selectedSeq,
-                  pickedSet: props.pickedSet,
-                  onPick: props.onPick,
-                  onSelect: props.onSelect,
-                  flex: "1 1 55%",
-                }),
-                e("div", { key: "events-split", style: { flex: "0 0 8px" } }),
-                e(Detail, { key: "detail", event: props.selected, flex: "0 0 380px" }),
-              ),
-            ]
+          ? [e(OverviewPanel, { key: "overview", projectDir: projectDir, debug: debugInfo.debug, events: props.events })]
           : tab === "schematic"
           ? [e(SchematicPanel, { key: "schematic", projectDir: projectDir })]
           : tab === "ecad"
           ? [e(EcadPanel, { key: "ecad", projectDir: projectDir })]
-          : tab === "faults"
-            ? [e(FaultPanel, { key: "faults", sessionId: props.sessionId })]
             : [
               e(
                 "div",
@@ -5097,13 +5017,6 @@ function EcadPanel(props) {
 
       /* 页签状态（S223）：左侧导航在页面外壳里，内容区只渲染当前页。 */
       const [tab, setTab] = useState("ecad");
-      /* 未读失败角标：停在别的页签时也能看见又有几条失败。 */
-      const failTotal = events.filter((item) => item.status === "fail").length;
-      const [failSeenNav, setFailSeenNav] = useState(0);
-      useEffect(() => {
-        if (tab === "faults") setFailSeenNav(failTotal);
-      }, [tab, failTotal]);
-      const unseenFails = Math.max(0, failTotal - failSeenNav);
       const collapsed = layout.collapsed ?? {};
       const panels = [];
       if (collapsed.channels !== true) {
@@ -5165,8 +5078,6 @@ function EcadPanel(props) {
           { key: "nav", style: { display: "flex", flexDirection: "column", marginTop: "4px" } },
           navGroup("session", "会话", [
             navItem("overview", DEBUG_LABELS.overview),
-            navItem("events", DEBUG_LABELS.events),
-            navItem("faults", DEBUG_LABELS.faults, unseenFails),
           ]),
           navGroup("hardware", "硬件", [
             navItem("schematic", DEBUG_LABELS.schematic),

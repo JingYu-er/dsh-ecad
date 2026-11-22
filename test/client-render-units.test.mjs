@@ -223,16 +223,18 @@ test("硬件台：每个页签、每个开关都点得下去，不会把面板�
     const first = await runtime.render(view.component, props);
     const firstText = runtime.textOf(first);
     if (!firstText.includes("概览")) console.log("FIRST TEXT:", firstText.slice(0, 400));
-    for (const label of ["概览", "事件", "流程图", "电路设计", "故障"]) {
+    for (const label of ["概览", "流程图", "电路设计"]) {
       assert.ok(firstText.includes(label), "页签缺 " + label);
     }
+    // 事件页与故障页已撤（S225）。
+    assert.equal(firstText.includes("故障"), false, "不该再有故障页");
     // 默认页必须是电路设计：串口 / RTT / 监视是固件侧的东西，不该是硬件台的首页（S213）。
     assert.ok(firstText.includes("器件搜索"), "默认页应是电路设计（首屏有器件搜索）：" + firstText.slice(0, 200));
     assert.equal(firstText.includes("串口"), false, "硬件台不该再出串口通道");
     assert.equal(firstText.includes("RTT"), false, "硬件台不该再出 RTT 通道");
 
     // 逐个页签点一遍：任何一次渲染抛异常都会在这里冒出来。
-    for (const label of ["概览", "事件", "流程图", "电路设计", "故障"]) {
+    for (const label of ["概览", "流程图", "电路设计"]) {
       const result = await runtime.click(view.component, props, (text) => text.trim() === label);
       if (result.clicked) {
         assert.ok(runtime.textOf(result.tree).length > 0, "点 " + label + " 之后面板不能是空的");

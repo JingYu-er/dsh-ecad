@@ -134,11 +134,15 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
     assert.ok(settingsText.includes("电路设计工具链"), "设置页标题要是电路设计工具链：" + settingsText.slice(0, 200));
     assert.equal(settingsText.includes("STM32 工具链"), false, "设置页里不该再出现 STM32 工具链");
 
+    const source0 = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
     const text = renderText(debug.component({}));
     assert.ok(text.includes("硬件台"), text.slice(0, 300));
-    for (const label of ["概览", "事件", "流程图", "电路设计", "故障"]) {
+    for (const label of ["概览", "流程图", "电路设计"]) {
       assert.ok(text.includes(label), "工作区标签要有 " + label + " 页：" + text.slice(0, 500));
     }
+    // 事件页与故障页已从硬件台撤掉（S225）：事件流在「调试台」，硬件台只留工程视角。
+    assert.equal(source0.includes("navItem(\"events\""), false, "导航里不该再有事件页");
+    assert.equal(source0.includes("navItem(\"faults\""), false, "导航里不该再有故障页");
     assert.ok(text.includes("工程"), "未选工程时要有工程卡片：" + text.slice(0, 500));
     assert.ok(text.includes("回放…"), "工具栏要有回放入口：" + text.slice(0, 500));
     assert.ok(text.includes("导出 JSONL"), "工具栏要能导出当前视图：" + text.slice(0, 500));
@@ -150,7 +154,8 @@ test("client.js：注册设置面板与调试台两个槽位，调试台可渲�
     assert.ok(source.includes("硬件侧"), "概览页要说明硬件侧入口");
     assert.ok(source.includes("function EcadPanel("), "电路设计页要在（S99）");
     assert.ok(source.includes("function SchematicPanel("), "流程图页要在（S90）");
-    assert.ok(source.includes("function FaultPanel("), "故障页要在");
+    assert.ok(source.includes("function FaultPanel("), "故障面板定义还在（只是没有入口）");
+    assert.ok(source.includes("function SchematicPanel("), "流程图页要在");
     assert.ok(!source.includes("function PinoutPanel("), "引脚页已删除（S192）");
     assert.ok(!source.includes("function ClockPanel("), "时钟页已删除（S192）");
     assert.ok(!source.includes("function InterruptPanel("), "中断页已删除（S192）");
@@ -273,8 +278,10 @@ test("电路设计页能用自有规则布线（S195）", () => {
   const text = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
   assert.ok(text.includes("自有规则布线"));
   assert.ok(text.includes('"route-own"'));
-  // 布线完要把引擎的话（线宽分布、细段占比、补布轮次）原样摊开，不能只报「成功」
-  assert.ok(text.includes('key: "route-notes"'));
+  // 引擎的话（线宽分布、细段占比、降档口径）交给结果行的摘要，不再逐条铺开（S225）。
+  // 结果区只留摘要、步骤、DFM 行与产物计数；布线 notes 不再逐条铺开（S225）。
+  assert.ok(text.includes("产物 "), "产物改成计数");
+  assert.equal(text.includes('key: "route-notes"'), false, "布线 notes 不再逐条铺开");
 });
 
 test("电路设计页能看板图：按层开关请求 /ecad/pcb，SVG 内联渲染（S151）", () => {
