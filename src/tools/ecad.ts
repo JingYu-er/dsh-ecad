@@ -838,6 +838,8 @@ export function registerEcadTools(ctx: DshContext): void {
           },
           manifestFirst: { type: "boolean" },
           manifestLines: { type: "number" },
+          missingMembers: { type: "array", items: { type: "string" } },
+          unlistedMembers: { type: "array", items: { type: "string" } },
           problems: {
             type: "array",
             items: {
@@ -861,6 +863,8 @@ export function registerEcadTools(ctx: DshContext): void {
           "members",
           "manifestFirst",
           "manifestLines",
+          "missingMembers",
+          "unlistedMembers",
           "problems",
           "notes",
         ],
@@ -875,6 +879,8 @@ export function registerEcadTools(ctx: DshContext): void {
           members: { name: string; bytes: number }[];
           manifestFirst: boolean;
           manifestLines: number;
+          missingMembers: string[];
+          unlistedMembers: string[];
           problems: { id: string; severity: string; message: string }[];
           notes: string[];
         };
@@ -882,6 +888,8 @@ export function registerEcadTools(ctx: DshContext): void {
         if (args.error !== "") lines.push("- 错误：" + args.error);
         if (args.file !== "") lines.push("- 文件：" + args.file + "（" + String(args.bytes) + " 字节，" + String(args.members.length) + " 个成员）");
         lines.push("- 清单：" + (args.manifestFirst ? "第一项是 manifest.txt" : "manifest.txt 不在第一项") + "（" + String(args.manifestLines) + " 行）");
+        if (args.missingMembers.length > 0) lines.push("- 清单列了但包里没有：" + args.missingMembers.slice(0, 4).join("、"));
+        if (args.unlistedMembers.length > 0) lines.push("- 包里有但清单没列：" + args.unlistedMembers.slice(0, 4).join("、"));
         for (const problem of args.problems.slice(0, 8)) lines.push("- [" + problem.severity + "] " + problem.message);
         if (args.problems.length > 8) lines.push("- …还有 " + String(args.problems.length - 8) + " 条");
         for (const note of args.notes) lines.push("- " + note);
@@ -911,6 +919,8 @@ export function registerEcadTools(ctx: DshContext): void {
         members: report.members.map((item) => ({ name: item.name, bytes: item.bytes, crc32: item.crc32, sha256: item.sha256 })),
         manifestFirst: report.manifestFirst,
         manifestLines: report.manifestLines,
+        missingMembers: [...report.missingMembers],
+        unlistedMembers: [...report.unlistedMembers],
         problems: report.problems.map((item) => ({ id: item.id, severity: item.severity, message: item.message })),
         notes: [...report.notes],
       };

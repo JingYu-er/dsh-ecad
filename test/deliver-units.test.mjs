@@ -57,3 +57,56 @@ test("交付包身份：清单第一项、逐成员哈希、路径与重名都�
   assert.ok(bad.problems.some((item) => item.id === "bundle.unsafe-name"), JSON.stringify(bad.problems));
   assert.ok(bad.problems.some((item) => item.id === "bundle.duplicate"), JSON.stringify(bad.problems));
 });
+
+test("交付包身份：清单不许引用自身，列了没有与有了没列都要报（S235）", () => {
+  const gerber = Buffer.from("%FSLAX46Y46*%\nM02*\n", "utf8");
+  const drill = Buffer.from("M48\nM30\n", "utf8");
+  const list = (items) =>
+    Buffer.from(
+      "生成时间：2026-11-23 00:00:00\n文件数：" + String(items.length + 1) + "\n字节数：" +
+        String(items.reduce((sum, item) => sum + item.bytes, 0)) +
+        "\n" + items.map((item) => item.name + " " + String(item.bytes)).join("\n") + "\n",
+      "utf8",
+    );
+
+  // 好包：清单与成员一一对上
+  const good = verifyBundle(
+    makeZip([
+      { name: "manifest.txt", data: list([{ name: "gerbers/a.gtl", bytes: gerber.length }, { name: "gerbers/b.drl", bytes: drill.length }]) },
+      { name: "gerbers/a.gtl", data: gerber },
+      { name: "gerbers/b.drl", data: drill },
+    ]),
+  );
+  assert.equal(good.ok, true, JSON.stringify(good.problems));
+  assert.deepEqual(good.missingMembers, []);
+  assert.deepEqual(good.unlistedMembers, []);
+
+  // 清单把自己这个包写进成员：用自己证明自己
+  const self = verifyBundle(
+    makeZip([
+      {
+        name: "manifest.txt",
+        data: Buffer.from(
+          "生成时间：2026-11-23 00:00:00\n文件数：1\n字节数：0\n" + "bundle.zip 1000\n",
+          "utf8",
+        ),
+      },
+    ]),
+  );
+  assert.equal(self.ok, false);
+  assert.ok(self.problems.some((item) => item.id === "bundle.manifest-self"), JSON.stringify(self.problems));
+
+  // 清单列了 b.drl 但包里没有；包里多了一个 zzz.gtl 没写进清单
+  const drift = verifyBundle(
+    makeZip([
+      { name: "manifest.txt", data: list([{ name: "gerbers/a.gtl", bytes: gerber.length }, { name: "gerbers/b.drl", bytes: drill.length }]) },
+      { name: "gerbers/a.gtl", data: gerber },
+      { name: "gerbers/zzz.gtl", data: Buffer.from("x", "utf8") },
+    ]),
+  );
+  assert.equal(drift.ok, false);
+  assert.deepEqual(drift.missingMembers, ["gerbers/b.drl"]);
+  assert.deepEqual(drift.unlistedMembers, ["gerbers/zzz.gtl"]);
+  assert.ok(drift.problems.some((item) => item.id === "bundle.manifest-missing-member"), JSON.stringify(drift.problems));
+  assert.ok(drift.problems.some((item) => item.id === "bundle.manifest-unlisted"), JSON.stringify(drift.problems));
+});
