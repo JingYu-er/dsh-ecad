@@ -59,7 +59,7 @@ dsh plugin --profile desktop add dsh-ecad
 
 `dsh-ecad` 不猜器件：`index.circuit.tsx` 里的 `jlcpcb:C<编号>` 决定 BOM 料号，封装名决定 PCB 封装；缺封装时 `stm32_part_import` 从 KiCad 官方库复制，库里没有才回退立创页面转换，两条都失败会同时给出两个原因。
 
-## 工具参考（52 个）
+## 工具参考（53 个）
 
 ### 工程与构建
 

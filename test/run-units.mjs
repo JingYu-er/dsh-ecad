@@ -50,6 +50,7 @@ const suites = [
   "silk-units.test.mjs",
   "candidates-units.test.mjs",
   "widen-units.test.mjs",
+  "ortho-units.test.mjs",
   "power-units.test.mjs",
   "fab-tier-units.test.mjs",
   "decap-plan-units.test.mjs",

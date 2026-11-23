@@ -50,6 +50,7 @@ import { readBuses, type BusReport } from "../engine/ecad/pcb/bus.js";
 import { readSilk } from "../engine/ecad/pcb/silk.js";
 import { compareCandidates } from "../engine/ecad/pcb/candidates.js";
 import { applyWiden, planWiden } from "../engine/ecad/pcb/widen.js";
+import { planOrthogonalize } from "../engine/ecad/pcb/ortho.js";
 import { backupBoardFile } from "../engine/ecad/pcb/hand-sync.js";
 import { readDiff, renderDiffHtml, renderDiffSvg, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
@@ -85,6 +86,7 @@ export const PCB_BUS_TOOL = "stm32_pcb_bus";
 export const PCB_SILK_TOOL = "stm32_pcb_silk";
 export const PCB_CANDIDATES_TOOL = "stm32_pcb_candidates";
 export const PCB_WIDEN_TOOL = "stm32_pcb_widen";
+export const PCB_ORTHO_TOOL = "stm32_pcb_ortho";
 /** 改前改后对比（S232）：逐层列新增/删除的走线与过孔，并写同原点叠图。 */
 export const PCB_DIFF_TOOL = "stm32_pcb_diff";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
@@ -2965,6 +2967,95 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     required: ["ok", "error", "boardFile", "stats", "planes", "findings", "notes"],
   };
+
+  const orthoOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      boardFile: { type: "string" },
+      runs: { type: "number" },
+      feasible: { type: "number" },
+      kept: { type: "number" },
+      diagonalMm: { type: "number" },
+      totalMm: { type: "number" },
+      diagonalShare: { type: "number" },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "boardFile", "runs", "feasible", "kept", "diagonalMm", "totalMm", "diagonalShare", "notes"],
+  };
+
+  const orthoTool: ToolDefinition = {
+    name: PCB_ORTHO_TOOL,
+    description:
+      "走线风格体检：统计斜线占比，找出「长斜线改横竖 L 形」的候选，并说明哪些被焊盘/铺铜挡住；只读，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        minRunMm: { type: "number", description: "多长的斜线算「长斜线」，默认 2 mm。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: orthoOutput,
+      render: (result: Record<string, unknown>) => {
+        const share = typeof result.diagonalShare === "number" ? (result.diagonalShare * 100).toFixed(1) : "0.0";
+        const lines = [
+          "走线风格：" + String(result.boardFile),
+          "斜线 " + String((result.diagonalMm as number).toFixed(1)) + " / " + String((result.totalMm as number).toFixed(1)) + " mm（占比 " + share + "%）；长斜线 " +
+            String(result.runs) + " 条，可改 L 形 " + String(result.feasible) + " 条，保留 " + String(result.kept) + " 条",
+        ];
+        for (const note of result.notes as string[]) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 60_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; boardFile?: string; minRunMm?: number }, exec: ToolExec) => {
+      const empty = {
+        ok: false,
+        error: "",
+        boardFile: "",
+        runs: 0,
+        feasible: 0,
+        kept: 0,
+        diagonalMm: 0,
+        totalMm: 0,
+        diagonalShare: 0,
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") boardFile = resolve(resolved.projectDir, args.boardFile);
+      else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
+      const report = planOrthogonalize(readFileSync(boardFile, "utf8"), { minRunMm: args.minRunMm ?? 2 });
+      if (!report.ok) return { ...empty, boardFile, error: report.error };
+      return {
+        ok: true,
+        error: "",
+        boardFile,
+        runs: report.runs.length,
+        feasible: report.replaced,
+        kept: report.kept,
+        diagonalMm: report.diagonalMm,
+        totalMm: report.totalMm,
+        diagonalShare: report.diagonalShare,
+        notes: report.notes,
+      };
+    },
+  };
+  ctx.tools.register(orthoTool);
 
   const widenOutput: JsonSchema = {
     type: "object",

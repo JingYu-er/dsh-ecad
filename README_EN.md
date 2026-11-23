@@ -59,7 +59,7 @@ External dependencies (each tool states what is missing):
 
 Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the footprint name decides the PCB footprint. When a footprint is missing, `stm32_part_import` copies it from the KiCad library and only falls back to converting the LCSC page; if both fail the error carries both reasons.
 
-## Tools (52)
+## Tools (53)
 
 ### Project and build
 

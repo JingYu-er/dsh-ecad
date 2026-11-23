@@ -195,7 +195,7 @@ async function collectTools() {
 
 test("schema 子集：全部工具的参数与输出都只用宿主 0.2.2 放行的关键字", async () => {
   const tools = await collectTools();
-  assert.equal(tools.length, 52, "注册到的工具数与 README 不一致（实际 " + String(tools.length) + "）");
+  assert.equal(tools.length, 53, "注册到的工具数与 README 不一致（实际 " + String(tools.length) + "）");
   const problems = [];
   for (const def of tools) {
     for (const violation of schemaViolations(def.parameters)) problems.push(def.name + " [parameters] " + violation);
