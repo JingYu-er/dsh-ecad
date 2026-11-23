@@ -44,6 +44,7 @@ import { analyzeEmc, defaultCurrentForNet, requiredWidthMm } from "../engine/eca
 import { readEmcDeep } from "../engine/ecad/pcb/emc-deep.js";
 import { readLayout } from "../engine/ecad/pcb/layout-check.js";
 import { readRouting } from "../engine/ecad/pcb/routing.js";
+import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
 import { readGerberSet } from "../engine/ecad/pcb/gerber.js";
 import { collectBriefFacts, renderBrief, renderMrd, renderPrd, writeBriefs } from "../engine/ecad/brief.js";
@@ -70,6 +71,8 @@ export const PCB_MECH_TOOL = "stm32_mech";
 export const PCB_LINKS_TOOL = "stm32_pcb_links";
 export const PCB_LAYOUT_TOOL = "stm32_pcb_layout";
 export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
+/** 逐层物理图：每层一张，同原点同比例（S230）。 */
+export const PCB_LAYERS_TOOL = "stm32_pcb_layers";
 export const PCB_GERBER_TOOL = "stm32_pcb_gerber";
 
 const output: JsonSchema = {
@@ -1760,6 +1763,96 @@ export function registerPcbTools(ctx: DshContext): void {
     required: ["ok", "error", "boardFile", "copperLayers", "pairs", "decaps", "planes", "findings", "notes"],
   };
 
+  ctx.tools.register({
+    name: PCB_LAYERS_TOOL,
+    description:
+      "逐层物理图：让 KiCad 每层铜各出一张 SVG（只留板面、原点与比例一致），用于逐层核对与改前改后叠图。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        blackAndWhite: { type: "boolean", description: "黑白稿，默认 true；要配色就传 false。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+          error: { type: "string" },
+          dir: { type: "string" },
+          layers: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                file: { type: "string" },
+                bytes: { type: "number" },
+              },
+              required: ["name", "file", "bytes"],
+              additionalProperties: false,
+            },
+          },
+          notes: { type: "array", items: { type: "string" } },
+        },
+        required: ["ok", "error", "dir", "layers", "notes"],
+        additionalProperties: false,
+      },
+      render: (rawArgs) => {
+        const result = rawArgs as {
+          ok: boolean;
+          error: string;
+          dir: string;
+          layers: { name: string; file: string }[];
+          notes: string[];
+        };
+        if (!result.ok) return [{ type: "text", text: "逐层图导出失败：" + result.error }];
+        const lines = ["逐层图：" + String(result.layers.length) + " 层 → " + result.dir];
+        for (const layer of result.layers) lines.push("- " + layer.name + "：" + layer.file);
+        for (const note of result.notes) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 300_000,
+    isConcurrencySafe: () => false,
+    execute: async (args: { projectDir?: string; boardFile?: string; blackAndWhite?: boolean }, exec: ToolExec) => {
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...EMPTY_LAYERS, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") {
+        boardFile = resolve(resolved.projectDir, args.boardFile);
+      } else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...EMPTY_LAYERS, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...EMPTY_LAYERS, error: "找不到板子文件：" + boardFile };
+      const located = locateEcadToolchain();
+      if (!located.ok || located.toolchain === null) return { ...EMPTY_LAYERS, error: located.error };
+      const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+      const outDir = join(workspace.outDir, "layers");
+      fsMkdir(outDir);
+      const result = await exportLayerSvgs(
+        { kicadCli: located.toolchain.kicadCli, env: located.toolchain.env, subprocess: ctx.subprocess },
+        boardFile,
+        readText(boardFile),
+        { outDir, blackAndWhite: args.blackAndWhite !== false },
+      );
+      return {
+        ok: result.ok,
+        error: result.error,
+        dir: result.dir,
+        layers: result.layers.map((layer) => ({ name: layer.name, file: layer.file, bytes: layer.bytes })),
+        notes: [...result.notes],
+      };
+    },
+  });
+
   const linksTool: ToolDefinition = {
     name: PCB_LINKS_TOOL,
     description:
@@ -2805,4 +2898,22 @@ export function registerPcbTools(ctx: DshContext): void {
 
   ctx.tools.register(render3dTool);
   ctx.tools.register(swapTool);
+}
+
+/** mkdir -p；目录已存在不算错。 */
+function fsMkdir(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    // 建不出来就让后续的导出报错，这里不吞掉更多信息。
+  }
+}
+
+/** 读板子文本；读不到回空串，导出会因为「没有铜层」而失败并给出原因。 */
+function readText(file: string): string {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
 }

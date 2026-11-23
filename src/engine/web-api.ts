@@ -21,7 +21,7 @@ import {
   updateToolchainConfig,
   type ToolchainConfig,
 } from "../data/toolchain-config.js";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -74,6 +74,7 @@ import { readEmcDeep } from "./ecad/pcb/emc-deep.js";
 import { readLayout } from "./ecad/pcb/layout-check.js";
 import { readRouting } from "./ecad/pcb/routing.js";
 import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
+import { EMPTY_LAYERS, exportLayerSvgs } from "./ecad/pcb/layers.js";
 import { readLinks } from "./ecad/pcb/links.js";
 import { editStorePath, readSchEdits, replaySchEditsTo, writeSchEdits } from "./schematic/edit.js";
 import { readGerberSet } from "./ecad/pcb/gerber.js";
@@ -339,6 +340,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/layout-check",
   WEB_API_PREFIX + "/ecad/routing",
   WEB_API_PREFIX + "/ecad/verify-bundle",
+  WEB_API_PREFIX + "/ecad/layers",
   WEB_API_PREFIX + "/ecad/gerber",
   WEB_API_PREFIX + "/ecad/render3d",
   WEB_API_PREFIX + "/ecad/swap",
@@ -616,6 +618,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/layout-check" &&
     path !== WEB_API_PREFIX + "/ecad/routing" &&
     path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
+    path !== WEB_API_PREFIX + "/ecad/layers" &&
     path !== WEB_API_PREFIX + "/ecad/gerber" &&
     path !== WEB_API_PREFIX + "/ecad/render3d" &&
     path !== WEB_API_PREFIX + "/ecad/swap" &&
@@ -1444,6 +1447,43 @@ export async function handleWebApi(input: {
         stats: report.stats,
         findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
         notes: [...report.notes],
+      },
+    });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/layers") {
+    // 逐层物理图（S230）：每层铜一张 SVG，只留板面、原点与比例一致。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const workspace = planEcadWorkspace(projectDir, resolveProjectLayout(projectDir).hardwareDir);
+    const latest = findLatestKicadBuild(workspace);
+    if (!latest.ok || latest.pcbFile === "") {
+      return ok({ layers: { ...EMPTY_LAYERS, error: latest.ok ? "还没有 .kicad_pcb：先构建一次" : latest.error } });
+    }
+    const located = locateEcadToolchain(envOf(input.deps));
+    if (!located.ok || located.toolchain === null) {
+      return ok({ layers: { ...EMPTY_LAYERS, error: "找不到 KiCad 工具链：" + located.error } });
+    }
+    const outDir = join(workspace.outDir, "layers");
+    try {
+      mkdirSync(outDir, { recursive: true });
+    } catch {
+      // 建不出来让导出自己报错。
+    }
+    const result = await exportLayerSvgs(
+      { kicadCli: located.toolchain.kicadCli, env: located.toolchain.env, subprocess: input.deps.subprocess },
+      latest.pcbFile,
+      readFileSync(latest.pcbFile, "utf8"),
+      { outDir },
+    );
+    return ok({
+      layers: {
+        ok: result.ok,
+        error: result.error,
+        dir: result.dir,
+        layers: result.layers.map((layer) => ({ ...layer })),
+        notes: [...result.notes],
       },
     });
   }
