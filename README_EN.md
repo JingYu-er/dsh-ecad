@@ -59,7 +59,7 @@ External dependencies (each tool states what is missing):
 
 Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the footprint name decides the PCB footprint. When a footprint is missing, `stm32_part_import` copies it from the KiCad library and only falls back to converting the LCSC page; if both fail the error carries both reasons.
 
-## Tools (48)
+## Tools (49)
 
 ### Project and build
 
@@ -105,7 +105,7 @@ Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the foo
 
 ### Checks and cost
 
-`stm32_netgate`, `stm32_emc`, `stm32_pcb_layout`, `stm32_pcb_routing`, `stm32_pcb_links`, `stm32_power`, `stm32_bom`, `stm32_brief`, `stm32_symbol_footprint`, `stm32_ecad_verify`, `stm32_pcb_reference`, `stm32_pcb_diff`, `stm32_pcb_layers`.
+`stm32_netgate`, `stm32_emc`, `stm32_pcb_layout`, `stm32_pcb_routing`, `stm32_pcb_links`, `stm32_power`, `stm32_bom`, `stm32_brief`, `stm32_symbol_footprint`, `stm32_ecad_verify`, `stm32_pcb_reference`, `stm32_pcb_bus`, `stm32_pcb_diff`, `stm32_pcb_layers`.
 
 ### Parts and datasheets
 

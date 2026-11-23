@@ -46,7 +46,8 @@ import { readEmcDeep } from "../engine/ecad/pcb/emc-deep.js";
 import { readLayout } from "../engine/ecad/pcb/layout-check.js";
 import { readRouting } from "../engine/ecad/pcb/routing.js";
 import { readReference } from "../engine/ecad/pcb/reference.js";
-import { readDiff, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
+import { readBuses, type BusReport } from "../engine/ecad/pcb/bus.js";
+import { readDiff, renderDiffHtml, renderDiffSvg, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
 import { readGerberSet } from "../engine/ecad/pcb/gerber.js";
@@ -76,6 +77,7 @@ export const PCB_LAYOUT_TOOL = "stm32_pcb_layout";
 export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
 /** 双向参考面复核（S231）：走线是否跨参考缺口、过孔是否贴平面边缘。 */
 export const PCB_REFERENCE_TOOL = "stm32_pcb_reference";
+export const PCB_BUS_TOOL = "stm32_pcb_bus";
 /** 改前改后对比（S232）：逐层列新增/删除的走线与过孔，并写同原点叠图。 */
 export const PCB_DIFF_TOOL = "stm32_pcb_diff";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
@@ -185,6 +187,27 @@ const autorouteOutput: JsonSchema = {
   },
   required: ["ok", "error", "dryRun", "boardFile", "output", "engine", "seconds", "openNets", "steps", "warnings", "notes"],
 };
+
+function formatBuses(report: BusReport): string {
+  const lines: string[] = [];
+  lines.push("总线体检：" + report.boardFile);
+  lines.push("输入：平行线束 " + String(report.groups.length) + " 组，电源主干 " + String(report.trunks.length) + " 条");
+  for (const group of report.groups.slice(0, 10)) {
+    lines.push(
+      "· " + group.layer + " " + String(group.angleDeg) + "° ×" + String(group.lines) + "（" + group.net + "）间距 " +
+      group.spacingMm.join(" / ") + " mm，差 " + String(group.unevenMm) + " mm",
+    );
+  }
+  for (const trunk of report.trunks.slice(0, 6)) {
+    lines.push(
+      "· 主干 " + trunk.net + " " + trunk.layer + "：" + String(trunk.dominantMm) + " mm（" + String(trunk.total) + " 段，细段 " + String(trunk.narrow) + "）",
+    );
+  }
+  for (const finding of report.findings) {
+    lines.push("[" + finding.severity + "] " + finding.message + (finding.fix === "" ? "" : " → " + finding.fix));
+  }
+  return lines.join("\n");
+}
 
 export function registerPcbTools(ctx: DshContext): void {
   const tool: ToolDefinition = {
@@ -2006,9 +2029,10 @@ export function registerPcbTools(ctx: DshContext): void {
           },
           svgDir: { type: "string" },
           svgLayers: { type: "array", items: { type: "string" } },
+          htmlFile: { type: "string" },
           notes: { type: "array", items: { type: "string" } },
         },
-        required: ["ok", "error", "beforeFile", "afterFile", "layers", "stats", "findings", "svgDir", "svgLayers", "notes"],
+        required: ["ok", "error", "beforeFile", "afterFile", "layers", "stats", "findings", "svgDir", "svgLayers", "htmlFile", "notes"],
       },
       render: (_args, value) => {
         const result = value as {
@@ -2018,6 +2042,7 @@ export function registerPcbTools(ctx: DshContext): void {
           stats: { added: number; removed: number; addedMm: number; removedMm: number; addedVias: number; removedVias: number };
           svgDir: string;
           svgLayers: string[];
+          htmlFile: string;
           notes: string[];
         };
         if (!result.ok) return [{ type: "text", text: "改前改后对比失败：" + result.error }];
@@ -2032,6 +2057,7 @@ export function registerPcbTools(ctx: DshContext): void {
           lines.push("- " + layer.layer + "：+" + String(layer.added) + " / -" + String(layer.removed));
         }
         if (result.svgDir !== "") lines.push("叠图：" + result.svgDir + "（" + result.svgLayers.join("、") + "）");
+        if (result.htmlFile !== "") lines.push("逐层报告：" + result.htmlFile);
         for (const note of result.notes) lines.push("说明：" + note);
         return [{ type: "text", text: lines.join("\n") }];
       },
@@ -2049,6 +2075,7 @@ export function registerPcbTools(ctx: DshContext): void {
         findings: [] as Array<Record<string, unknown>>,
         svgDir: "",
         svgLayers: [] as string[],
+        htmlFile: "",
         notes: [] as string[],
       };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
@@ -2072,6 +2099,18 @@ export function registerPcbTools(ctx: DshContext): void {
       const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
       const outDir = join(workspace.outDir, "diff");
       const svg = writeDiffSvgs(beforeFile, afterFile, outDir, (dir: string) => { fsMkdir(dir); });
+      // 逐层并排 HTML（S237）：图直接内联，报告能单独发出去。
+      let htmlFile = "";
+      if (svg.ok) {
+        const beforeText = readFileSync(beforeFile, "utf8");
+        const afterText = readFileSync(afterFile, "utf8");
+        const svgs = new Map<string, string>();
+        for (const layer of svg.layers) {
+          svgs.set(layer, renderDiffSvg(beforeText, afterText, { layers: [layer] }).svg);
+        }
+        htmlFile = join(outDir, "report.html");
+        writeFileSync(htmlFile, renderDiffHtml(report, { svgs, title: "改前改后对比" }), "utf8");
+      }
       return {
         ok: true,
         error: "",
@@ -2090,6 +2129,7 @@ export function registerPcbTools(ctx: DshContext): void {
         findings: report.findings.map((finding) => ({ ...finding })),
         svgDir: svg.ok ? svg.file : "",
         svgLayers: svg.ok ? [...svg.layers] : [],
+        htmlFile,
         notes: [...report.notes, ...svg.notes, ...(svg.ok ? [] : [svg.error])],
       };
     },
@@ -2918,6 +2958,164 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     required: ["ok", "error", "boardFile", "stats", "planes", "findings", "notes"],
   };
+
+  const busOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      boardFile: { type: "string" },
+      groups: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            net: { type: "string" },
+            layer: { type: "string" },
+            angleDeg: { type: "number" },
+            lines: { type: "number" },
+            spacingMm: { type: "array", items: { type: "number" } },
+            unevenMm: { type: "number" },
+          },
+          required: ["net", "layer", "angleDeg", "lines", "spacingMm", "unevenMm"],
+        },
+      },
+      trunks: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            net: { type: "string" },
+            layer: { type: "string" },
+            dominantMm: { type: "number" },
+            narrow: { type: "number" },
+            total: { type: "number" },
+            ok: { type: "boolean" },
+          },
+          required: ["net", "layer", "dominantMm", "narrow", "total", "ok"],
+        },
+      },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            severity: { type: "string" },
+            message: { type: "string" },
+            fix: { type: "string" },
+          },
+          required: ["id", "severity", "message", "fix"],
+        },
+      },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "boardFile", "groups", "trunks", "findings", "notes"],
+  };
+
+  const busTool: ToolDefinition = {
+    name: PCB_BUS_TOOL,
+    description:
+      "成组几何体检：同层同角度的平行线束是否等距，电源主干里有没有夹着的细段。只看几何，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        toleranceMm: { type: "number", description: "相邻间距差超过这个值算不等距，默认 0.15 mm。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: busOutput,
+      render: (result: Record<string, unknown>) => {
+      const lines: string[] = [];
+      const groups = result.groups as Array<{ net: string; layer: string; angleDeg: number; lines: number; spacingMm: number[]; unevenMm: number }>;
+      const trunks = result.trunks as Array<{ net: string; layer: string; dominantMm: number; narrow: number; total: number }>;
+      const findings = result.findings as Array<{ severity: string; message: string; fix: string }>;
+      const notes = result.notes as string[];
+      lines.push("总线与主干：" + String(result.boardFile));
+      lines.push("平行线束 " + String(groups.length) + " 组，电源主干 " + String(trunks.length) + " 条");
+      for (const group of groups.slice(0, 8)) {
+        lines.push(
+          "· " + group.layer + " " + String(group.angleDeg) + "° ×" + String(group.lines) + "（" + group.net + "）间距 " +
+          group.spacingMm.join(" / ") + " mm，差 " + String(group.unevenMm) + " mm",
+        );
+      }
+      for (const trunk of trunks.slice(0, 6)) {
+        lines.push(
+          "· 主干 " + trunk.net + " " + trunk.layer + " " + String(trunk.dominantMm) + " mm（" + String(trunk.total) + " 段，细段 " + String(trunk.narrow) + "）",
+        );
+      }
+      for (const finding of findings) lines.push((finding.severity === "warning" ? "告警" : "提示") + "：" + finding.message + (finding.fix === "" ? "" : " → " + finding.fix));
+      for (const note of notes) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; boardFile?: string; toleranceMm?: number }, exec: ToolExec) => {
+      const empty = {
+        ok: false,
+        error: "",
+        boardFile: "",
+        groups: [] as Array<Record<string, unknown>>,
+        trunks: [] as Array<Record<string, unknown>>,
+        findings: [] as Array<Record<string, unknown>>,
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") {
+        boardFile = resolve(resolved.projectDir, args.boardFile);
+      } else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
+      const report = readBuses(boardFile, {
+        ...(typeof args.toleranceMm === "number" ? { toleranceMm: args.toleranceMm } : {}),
+      });
+      if (!report.ok) return { ...empty, boardFile, error: report.error };
+      return {
+        ok: true,
+        error: "",
+        boardFile: report.boardFile,
+        groups: report.groups.map((group) => ({
+          net: group.net,
+          layer: group.layer,
+          angleDeg: group.angleDeg,
+          lines: group.lines,
+          spacingMm: [...group.spacingMm],
+          unevenMm: group.unevenMm,
+        })),
+        trunks: report.trunks.map((trunk) => ({
+          net: trunk.net,
+          layer: trunk.layer,
+          dominantMm: trunk.dominantMm,
+          narrow: trunk.narrow,
+          total: trunk.total,
+          ok: trunk.ok,
+        })),
+        findings: report.findings.map((finding) => ({
+          id: finding.id,
+          severity: finding.severity,
+          message: finding.message,
+          fix: finding.fix,
+        })),
+        notes: [...report.notes],
+      };
+    },
+  };
+  ctx.tools.register(busTool);
 
   const referenceTool: ToolDefinition = {
     name: PCB_REFERENCE_TOOL,

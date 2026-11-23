@@ -390,6 +390,74 @@ export function renderDiffSvg(beforeText: string, afterText: string, options: { 
 }
 
 /** 把逐层差异图写到 <outDir>/<层名点换下划线>.svg。 */
+/**
+ * 逐层并排的 HTML 报告（S237）：每层一列，红=删除、绿=新增，配一张统计表。
+ * 图直接内联，报告可以单独发给别人看，不依赖 out/diff 目录还在。
+ */
+export function renderDiffHtml(
+  report: BoardDiff,
+  options: { svgs?: ReadonlyMap<string, string>; title?: string } = {},
+): string {
+  const rows = report.layers
+    .map((layer) => {
+      const svg = options.svgs?.get(layer.layer) ?? "";
+      return (
+        "<figure><figcaption>" + escapeHtml(layer.layer) + "<span>+" + String(layer.added) + " / −" + String(layer.removed) +
+        " · +" + layer.addedMm.toFixed(1) + " / −" + layer.removedMm.toFixed(1) + " mm</span></figcaption>" +
+        '<div class="board">' + svg + "</div></figure>"
+      );
+    })
+    .join("");
+  const table = report.layers
+    .map(
+      (layer) =>
+        "<tr><td>" + escapeHtml(layer.layer) + "</td><td>" + String(layer.before) + "</td><td>" + String(layer.after) +
+        "</td><td>+" + String(layer.added) + "</td><td>−" + String(layer.removed) + "</td><td>+" + layer.addedMm.toFixed(1) +
+        "</td><td>−" + layer.removedMm.toFixed(1) + "</td></tr>",
+    )
+    .join("");
+  const findings = report.findings
+    .map((finding) => "<li>" + escapeHtml(finding.message) + (finding.fix === "" ? "" : " → " + escapeHtml(finding.fix)) + "</li>")
+    .join("");
+  return (
+    "<!doctype html><html lang=zh><meta charset=utf-8><title>" + escapeHtml(options.title ?? "改前改后对比") + "</title>" +
+    "<style>" +
+    "body{margin:0;padding:24px 28px 48px;background:#f7f6f3;color:#16181c;font:13px/1.65 system-ui,-apple-system,'Segoe UI',sans-serif}" +
+    "h1{margin:0 0 4px;font-size:28px;font-weight:300;letter-spacing:-.02em}" +
+    ".lead{margin:0 0 18px;color:#5c6169;max-width:70ch}" +
+    ".legend{display:flex;gap:16px;margin:0 0 20px;font:11px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#5c6169}" +
+    ".legend i{display:inline-block;width:18px;height:3px;margin-right:6px;vertical-align:2px}" +
+    "table{border-collapse:collapse;margin:0 0 22px;font:12px/1.5 ui-monospace,monospace}" +
+    "th,td{border-bottom:1px solid #dcdad4;padding:5px 12px 5px 0;text-align:left}" +
+    "th{font-weight:600;color:#5c6169}" +
+    "figure{margin:0 0 22px;padding:12px;background:#fff;border:1px solid #dcdad4}" +
+    "figcaption{display:flex;justify-content:space-between;font:11px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#5c6169;margin-bottom:8px}" +
+    ".board svg{display:block;width:100%;height:auto;max-height:520px}" +
+    "ul{margin:0;padding-left:18px}" +
+    "</style>" +
+    "<h1>" + escapeHtml(options.title ?? "改前改后对比") + "</h1>" +
+    '<p class="lead">' + escapeHtml(basename(report.beforeFile)) + " → " + escapeHtml(basename(report.afterFile)) +
+    "：共 " + String(report.stats.added) + " 段新增、" + String(report.stats.removed) + " 段删除，" +
+    String(report.stats.addedVias) + " 个过孔新增、" + String(report.stats.removedVias) + " 个删除。" +
+    "两图同原点同比例，可直接叠看。</p>" +
+    '<div class="legend"><span><i style="background:#c03a2b"></i>删除</span><span><i style="background:#1f7a3f"></i>新增</span></div>' +
+    "<table><thead><tr><th>层</th><th>改前</th><th>改后</th><th>+段</th><th>−段</th><th>+mm</th><th>−mm</th></tr></thead><tbody>" +
+    table + "</tbody></table>" +
+    rows +
+    (findings === "" ? "" : "<h2>结论</h2><ul>" + findings + "</ul>") +
+    "</html>"
+  );
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;");
+}
+
+function basename(file: string): string {
+  const parts = file.split(/[\\/]/u);
+  return parts[parts.length - 1] ?? file;
+}
+
 export function writeDiffSvgs(beforeFile: string, afterFile: string, outDir: string, mkdir: (dir: string) => void): DiffSvg {
   try {
     const beforeText = readText(beforeFile);

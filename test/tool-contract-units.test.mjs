@@ -46,6 +46,7 @@ const GOLDEN = [
   "stm32_pcb_routing",
   "stm32_pcb_layers",
   "stm32_pcb_reference",
+  "stm32_pcb_bus",
   "stm32_pcb_diff",
   "stm32_ecad_verify",
   "stm32_pcb_place",

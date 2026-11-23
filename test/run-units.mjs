@@ -46,6 +46,7 @@ const suites = [
   "ecad-units.test.mjs",
   "deliver-units.test.mjs",
   "layers-units.test.mjs",
+  "bus-units.test.mjs",
   "power-units.test.mjs",
   "fab-tier-units.test.mjs",
   "decap-plan-units.test.mjs",
