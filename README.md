@@ -59,7 +59,7 @@ dsh plugin --profile desktop add dsh-ecad
 
 `dsh-ecad` 不猜器件：`index.circuit.tsx` 里的 `jlcpcb:C<编号>` 决定 BOM 料号，封装名决定 PCB 封装；缺封装时 `stm32_part_import` 从 KiCad 官方库复制，库里没有才回退立创页面转换，两条都失败会同时给出两个原因。
 
-## 工具参考（49 个）
+## 工具参考（50 个）
 
 ### 工程与构建
 
@@ -112,6 +112,7 @@ dsh plugin --profile desktop add dsh-ecad
 | `stm32_pcb_links` | 布线体检：差分对长度差、平面层上的信号、去耦电容到引脚距离 |
 | `stm32_pcb_layout` | 布局体检：去耦离电源脚、晶振离主控、接口贴边、主控留白、电源入口路径 |
 | `stm32_pcb_bus` | 成组几何体检：平行线束是否等距、电源主干有没有夹细段 |
+| `stm32_pcb_silk` | 丝印体检：丝印线或文字压到焊盘开窗、位号放在器件本体正中 |
 | `stm32_pcb_reference` | 双向参考面复核：走线是否跨出相邻层平面缺口、走线与过孔是否贴平面边缘 |
 | `stm32_pcb_diff` | 改前改后对比：逐层列新增/删除的走线与过孔，写同原点叠图（红=删除、绿=新增） |
 | `stm32_pcb_layers` | 逐层物理图：每层铜一张 SVG，只留板面、原点与比例一致，可改前改后叠图 |

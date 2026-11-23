@@ -41,6 +41,10 @@ export interface FabricationExport {
   readonly bundleBytes: number;
   readonly bundleFiles: number;
   readonly notes: readonly string[];
+  /** 明确跳过的 DRC 检查（写进 ignored.txt）。 */
+  readonly ignoredChecks?: readonly string[];
+  /** 明确决定不修的可制造性告警（写进 ignored.txt）。 */
+  readonly dfmIgnored?: readonly string[];
 }
 
 function listFiles(dir: string): FabricationFile[] {
@@ -227,6 +231,10 @@ export interface BundleInput {
   readonly stepFile: string;
   readonly stepBytes: number;
   readonly notes: readonly string[];
+  /** 明确跳过的 DRC 检查（写进 ignored.txt）。 */
+  readonly ignoredChecks?: readonly string[];
+  /** 明确决定不修的可制造性告警（写进 ignored.txt）。 */
+  readonly dfmIgnored?: readonly string[];
 }
 
 /**
@@ -290,6 +298,28 @@ export function writeFabricationBundle(input: BundleInput): { ok: boolean; error
   lines.push("");
   lines.push("导出说明：");
   for (const note of input.notes) lines.push("- " + note);
+  // 忽略项记录（S239）：板厂与复核的人都要知道「哪些告警是明确决定不修的」。
+  // 没有忽略项也写一个文件——"没写"和"没有"是两件事。
+  const ignoredLines: string[] = [];
+  ignoredLines.push("板子：" + input.board + ".kicad_pcb");
+  ignoredLines.push("导出目录：" + input.outDir);
+  ignoredLines.push("");
+  const ignoredChecks = input.ignoredChecks ?? [];
+  const dfmIgnored = input.dfmIgnored ?? [];
+  if (ignoredChecks.length === 0 && dfmIgnored.length === 0) {
+    ignoredLines.push("无：这次没有跳过任何 DRC 检查，也没有明确不修的可制造性告警。");
+  } else {
+    if (ignoredChecks.length > 0) {
+      ignoredLines.push("跳过的 DRC 检查：");
+      for (const item of ignoredChecks) ignoredLines.push("- " + item);
+      ignoredLines.push("");
+    }
+    if (dfmIgnored.length > 0) {
+      ignoredLines.push("明确不修的可制造性告警：");
+      for (const item of dfmIgnored) ignoredLines.push("- " + item);
+    }
+  }
+  entries.unshift({ name: "ignored.txt", data: Buffer.from(ignoredLines.join("\n") + "\n", "utf8") });
   entries.unshift({ name: "manifest.txt", data: Buffer.from(lines.join("\n") + "\n", "utf8") });
 
   const file = join(input.outDir, input.board + "-fabrication.zip");

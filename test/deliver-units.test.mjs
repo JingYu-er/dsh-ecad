@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,6 +16,21 @@ function makeZip(entries) {
 
 const manifest = (files, bytes) =>
   Buffer.from(`生成时间：2026-11-23 00:00:00\n文件数：${String(files)}\n字节数：${String(bytes)}\n`, "utf8");
+
+test("交付包身份：没有 ignored.txt 要报（S239）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-ecad-deliver-ignored-"));
+  const file = join(dir, "bundle.zip");
+  writeFileSync(
+    file,
+    createZip([
+      { name: "manifest.txt", data: Buffer.from("生成时间：2026-01-01\n文件数：1\n字节数：10\n", "utf8") },
+      { name: "gerbers/F_Cu.gtl", data: Buffer.from("%FSLAX46Y46*%\n%MOMM*%\n", "utf8") },
+    ]),
+  );
+  const report = verifyBundle(file);
+  assert.ok(report.problems.some((problem) => problem.id === "bundle.no-ignored-record"));
+  rmSync(dir, { recursive: true, force: true });
+});
 
 test("交付包身份：清单第一项、逐成员哈希、路径与重名都要核（S229）", () => {
   const gerber = Buffer.from("%FSLAX46Y46*%\nM02*\n", "utf8");
