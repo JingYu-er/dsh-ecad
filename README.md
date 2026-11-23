@@ -92,7 +92,7 @@ dsh plugin --profile desktop add dsh-ecad
 | 工具 | 说明 |
 | --- | --- |
 | `stm32_pcb_place` | 按网表放置：主控居中、接口沿边、小件贴大件、courtyard 间隙 0.6 mm |
-| `stm32_pcb_autoroute` | KiCadRoutingTools 布线（`dryRun` 默认 true，`apply` 前留 `.bak`） |
+| `stm32_pcb_autoroute` | 自有规则布线（`dryRun` 默认 true，`apply` 前留 `.bak`）；`turnCost`/`directionPreferenceCost` 调走线风格 |
 | `stm32_pcb_route` | 自研最近邻布线，仅作对照（已被取代） |
 | `stm32_pcb_ipc` | KiCad 官方 IPC：移动/布线/过孔/重铺/保存；未开 KiCad 时自动 `pcbnew` 打开并等就绪 |
 | `stm32_pcb_render` | 板图 SVG（顶层/底层，焊盘/走线/过孔/丝印/板框/位号可关） |

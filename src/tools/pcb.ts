@@ -526,6 +526,8 @@ export function registerPcbTools(ctx: DshContext): void {
         nets: { type: "array", items: { type: "string" }, description: "strategy=own 时要布的网络；缺省交给引擎按全部网络处理（耗时长）。" },
         ordering: { type: "string", enum: ["mps", "inside_out"], description: "strategy=own 的网络排序：mps（默认，先布大网）/ inside_out（由内向外）。" },
         strictSizes: { type: "boolean", description: "strategy=own 时要求引擎不交付低于请求尺寸的板子（route.py 的 --strict-sizes）：细间距焊盘出口挤不下就整次失败，而不是悄悄降档。" },
+        turnCost: { type: "number", description: "拐弯代价，引擎默认 1000；调高（如 4000）能减少 S 形折，代价是未连接数可能略升。" },
+        directionPreferenceCost: { type: "number", description: "偏离首选方向的代价，引擎默认 250。" },
       },
       required: [],
     },
@@ -546,7 +548,7 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     timeoutMs: 1_900_000,
     isConcurrencySafe: () => false,
-    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[]; ordering?: string; strictSizes?: boolean }, exec: ToolExec) => {
+    execute: async (args: { projectDir?: string; boardFile?: string; dryRun?: boolean; normalize?: boolean; apply?: boolean; strategy?: string; nets?: string[]; ordering?: string; strictSizes?: boolean; turnCost?: number; directionPreferenceCost?: number }, exec: ToolExec) => {
       const empty = { ok: false, error: "", dryRun: args.dryRun !== false, boardFile: "", output: "", engine: "", seconds: 0, openNets: -1, steps: [] as { tag: string; what: string; why: string; optional: boolean }[], warnings: [] as string[], notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
@@ -640,6 +642,11 @@ export function registerPcbTools(ctx: DshContext): void {
             boardEdgeClearanceMm: 0.3,
             neckdownMm: 0.8,
             strictSizes: args.strictSizes === true,
+            turnCost: typeof args.turnCost === "number" && args.turnCost > 0 ? args.turnCost : undefined,
+            directionPreferenceCost:
+              typeof args.directionPreferenceCost === "number" && args.directionPreferenceCost >= 0
+                ? args.directionPreferenceCost
+                : undefined,
             nets: args.nets ?? [],
           },
           signal: exec.signal,

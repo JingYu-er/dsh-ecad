@@ -37,6 +37,10 @@ export interface OwnRuleOptions {
   /** 过孔外径 / 钻孔（mm）。 */
   viaSizeMm?: number;
   viaDrillMm?: number;
+  /** 拐弯代价（每个方向变化记多少）。引擎默认 1000；实测 4000 能把 S 形折减半。 */
+  turnCost?: number;
+  /** 偏离首选方向的代价。引擎默认 250。 */
+  directionPreferenceCost?: number;
   /** 最多拆几次已布的线（0 = 不拆）。 */
   maxRipup?: number;
   /** 网格步长（mm）。 */
@@ -388,6 +392,10 @@ export function ownRuleArgv(runtimeRoot: string, request: Omit<OwnRuleRequest, "
   }
   if (options.viaSizeMm !== undefined) args.push("--via-size", options.viaSizeMm.toFixed(3));
   if (options.viaDrillMm !== undefined) args.push("--via-drill", options.viaDrillMm.toFixed(3));
+  if (options.turnCost !== undefined) args.push("--turn-cost", String(Math.round(options.turnCost)));
+  if (options.directionPreferenceCost !== undefined) {
+    args.push("--direction-preference-cost", String(Math.round(options.directionPreferenceCost)));
+  }
   if (options.maxRipup !== undefined) args.push("--max-ripup", String(options.maxRipup));
   if (options.gridStepMm !== undefined) args.push("--grid-step", options.gridStepMm.toFixed(3));
   if (options.boardEdgeClearanceMm !== undefined) args.push("--board-edge-clearance", options.boardEdgeClearanceMm.toFixed(3));

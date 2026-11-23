@@ -163,3 +163,16 @@ test("自有规则布线：strictSizes 才会传 --strict-sizes，默认不传�
   const strict = ownRuleArgv("C:/krt", { ...base, options: { ...base.options, strictSizes: true } });
   assert.ok(strict.includes("--strict-sizes"));
 });
+
+test("拐弯代价：传了才加 --turn-cost / --direction-preference-cost（S246）", () => {
+  const base = { inputPcb: "in.kicad_pcb", outputPcb: "out.kicad_pcb" };
+  const plain = ownRuleArgv("C:/krt", { ...base, options: { trackWidthMm: 0.25, clearanceMm: 0.2 } }).join(" ");
+  const tuned = ownRuleArgv("C:/krt", {
+    ...base,
+    options: { trackWidthMm: 0.25, clearanceMm: 0.2, turnCost: 4000, directionPreferenceCost: 1200 },
+  }).join(" ");
+  assert.equal(plain.includes("--turn-cost"), false);
+  assert.equal(plain.includes("--direction-preference-cost"), false);
+  assert.ok(tuned.includes("--turn-cost 4000"));
+  assert.ok(tuned.includes("--direction-preference-cost 1200"));
+});
