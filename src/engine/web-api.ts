@@ -87,6 +87,7 @@ import { EMPTY_SWAP, runSwap } from "./ecad/pcb/swap.js";
 import { EMPTY_EXPORT3D, exportBoard3d } from "./ecad/pcb/render3d.js";
 import { copyFileSync } from "node:fs";
 import { analyzePowerBudget } from "./ecad/pcb/power.js";
+import { analyzePower } from "./ecad/pcb/power-spec.js";
 import { collectBriefFacts, writeBriefs } from "./ecad/brief.js";
 import { readImpedancePlan } from "./ecad/pcb/impedance.js";
 import { checkNetGate, netGateSummary } from "./ecad/netgate.js";
@@ -1319,6 +1320,9 @@ export async function handleWebApi(input: {
       inputV: 0,
       efficiency: 0,
       unfilled: 0,
+      thin: [] as Array<Record<string, unknown>>,
+      vias: [] as Array<Record<string, unknown>>,
+      powerFindings: [] as Array<Record<string, unknown>>,
       notes: [] as string[],
     };
     if (!latest.ok || latest.pcbFile === "") return ok({ power: emptyPower });
@@ -1331,8 +1335,10 @@ export async function handleWebApi(input: {
         netlist = null;
       }
     }
-    const budget = analyzePowerBudget(readFileSync(latest.pcbFile, "utf8"), latest.pcbFile, netlist);
+    const boardText = readFileSync(latest.pcbFile, "utf8");
+    const budget = analyzePowerBudget(boardText, latest.pcbFile, netlist);
     if (!budget.ok) return ok({ power: { ...emptyPower, boardFile: latest.pcbFile, error: budget.error } });
+    const coarse = analyzePower(boardText, {});
     return ok({
       power: {
         ok: true,
@@ -1347,7 +1353,23 @@ export async function handleWebApi(input: {
         inputV: budget.inputV,
         efficiency: budget.efficiency,
         unfilled: budget.unfilled,
-        notes: budget.notes,
+        thin: coarse.thin.map((item) => ({
+          net: item.net,
+          layer: item.layer,
+          widthMm: item.widthMm,
+          requiredMm: item.requiredMm,
+          lengthMm: item.lengthMm,
+        })),
+        vias: coarse.vias.map((item) => ({
+          net: item.net,
+          currentA: item.currentA,
+          vias: item.vias,
+          needed: item.needed,
+          perViaA: item.perViaA,
+          ok: item.ok,
+        })),
+        powerFindings: coarse.findings.map((finding) => ({ ...finding })),
+        notes: [...budget.notes, ...coarse.notes],
       },
     });
   }

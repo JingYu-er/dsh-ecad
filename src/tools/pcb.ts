@@ -17,6 +17,7 @@ import { planPlacement } from "../engine/ecad/pcb/placement.js";
 import { countCopperLayers, ensureDesignRules } from "../engine/ecad/pcb/rules.js";
 import { buildApplyScript, parseApplyOutput } from "../engine/ecad/pcb/apply.js";
 import { defaultSchematicFile } from "../engine/ecad/pcb/layout-check.js";
+import { analyzePower } from "../engine/ecad/pcb/power-spec.js";
 import { planDecapMoves } from "../engine/ecad/pcb/decap-place.js";
 import { appendGroundZone, DEFAULT_POWER_NETS } from "../engine/ecad/pcb/route.js";
 import { buildGeometryScript, parseGeometry } from "../engine/ecad/pcb/geometry.js";
@@ -1431,9 +1432,56 @@ export function registerPcbTools(ctx: DshContext): void {
       inputV: { type: "number" },
       efficiency: { type: "number" },
       unfilled: { type: "number" },
+      thin: {
+        type: "array",
+        description: "细于所需宽度的电源走线段（只算没有整块铺铜的网络）。",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            net: { type: "string" },
+            layer: { type: "string" },
+            widthMm: { type: "number" },
+            requiredMm: { type: "number" },
+            lengthMm: { type: "number" },
+          },
+          required: ["net", "layer", "widthMm", "requiredMm", "lengthMm"],
+        },
+      },
+      vias: {
+        type: "array",
+        description: "每个电源网络的过孔数与按电流算出的最少需求。",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            net: { type: "string" },
+            currentA: { type: "number" },
+            vias: { type: "number" },
+            needed: { type: "number" },
+            perViaA: { type: "number" },
+            ok: { type: "boolean" },
+          },
+          required: ["net", "currentA", "vias", "needed", "perViaA", "ok"],
+        },
+      },
+      powerFindings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            severity: { type: "string", enum: ["warning", "info"] },
+            message: { type: "string" },
+            fix: { type: "string" },
+          },
+          required: ["id", "severity", "message", "fix"],
+        },
+      },
       notes: { type: "array", items: { type: "string" } },
     },
-    required: ["ok", "error", "boardFile", "rails", "totalA", "totalW", "estimatedA", "estimatedW", "inputA", "inputV", "efficiency", "unfilled", "notes"],
+    required: ["ok", "error", "boardFile", "rails", "totalA", "totalW", "estimatedA", "estimatedW", "inputA", "inputV", "efficiency", "unfilled", "thin", "vias", "powerFindings", "notes"],
   };
 
   const powerTool: ToolDefinition = {
@@ -1485,6 +1533,17 @@ export function registerPcbTools(ctx: DshContext): void {
         }
         lines.push("预算合计：" + String(result.totalA) + " A / " + String(result.totalW) + " W" + (result.estimatedA > 0 ? "；另有估算 " + String(result.estimatedA) + " A / " + String(result.estimatedW) + " W 不计入" : ""));
         if (result.inputA > 0) lines.push("输入：" + String(result.inputV) + " V 下约 " + String(result.inputA) + " A");
+        const coarseThin = (result as { thin?: { net: string; widthMm: number; requiredMm: number }[] }).thin ?? [];
+        const coarseVias = (result as { vias?: { net: string; vias: number; needed: number; perViaA: number; ok: boolean }[] }).vias ?? [];
+        const coarseFindings = (result as { powerFindings?: { message: string; fix: string }[] }).powerFindings ?? [];
+        if (coarseThin.length > 0) {
+          const worst = coarseThin.reduce((pick, item) => (item.widthMm < pick.widthMm ? item : pick), coarseThin[0] as { net: string; widthMm: number; requiredMm: number });
+          lines.push("细段：" + String(coarseThin.length) + " 段不足（最窄 " + worst.net + " " + String(worst.widthMm) + " mm / 需 " + String(worst.requiredMm) + " mm）");
+        }
+        for (const via of coarseVias) {
+          if (!via.ok) lines.push("过孔不足：" + via.net + " 有 " + String(via.vias) + " 个，按每孔 " + String(via.perViaA) + " A 至少要 " + String(via.needed) + " 个");
+        }
+        for (const finding of coarseFindings) lines.push("· " + finding.message + " 修法：" + finding.fix);
         for (const note of result.notes) lines.push("说明：" + note);
         return [{ type: "text", text: lines.join("\n") }];
       },
@@ -1492,7 +1551,7 @@ export function registerPcbTools(ctx: DshContext): void {
     timeoutMs: 30_000,
     isConcurrencySafe: () => true,
     execute: async (args: { projectDir?: string; boardFile?: string; currents?: { net: string; currentA: number }[]; voltages?: { net: string; voltageV: number }[]; inputV?: number; efficiency?: number }, exec: ToolExec) => {
-      const empty = { ok: false, error: "", boardFile: "", rails: [] as Array<Record<string, unknown>>, totalA: 0, totalW: 0, estimatedA: 0, estimatedW: 0, inputA: 0, inputV: 0, efficiency: 0, unfilled: 0, notes: [] as string[] };
+      const empty = { ok: false, error: "", boardFile: "", rails: [] as Array<Record<string, unknown>>, totalA: 0, totalW: 0, estimatedA: 0, estimatedW: 0, inputA: 0, inputV: 0, efficiency: 0, unfilled: 0, thin: [] as Array<Record<string, unknown>>, vias: [] as Array<Record<string, unknown>>, powerFindings: [] as Array<Record<string, unknown>>, notes: [] as string[] };
       const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
       if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
       let boardFile = "";
@@ -1529,6 +1588,7 @@ export function registerPcbTools(ctx: DshContext): void {
         efficiency: args.efficiency,
       });
       if (!budget.ok) return { ...empty, boardFile, error: budget.error };
+      const coarse = analyzePower(readFileSync(boardFile, "utf8"), { currents: args.currents ?? [] });
       return {
         ok: true,
         error: "",
@@ -1542,7 +1602,23 @@ export function registerPcbTools(ctx: DshContext): void {
         inputV: budget.inputV,
         efficiency: budget.efficiency,
         unfilled: budget.unfilled,
-        notes: [...budget.notes],
+        thin: coarse.thin.map((item) => ({
+          net: item.net,
+          layer: item.layer,
+          widthMm: item.widthMm,
+          requiredMm: item.requiredMm,
+          lengthMm: item.lengthMm,
+        })),
+        vias: coarse.vias.map((item) => ({
+          net: item.net,
+          currentA: item.currentA,
+          vias: item.vias,
+          needed: item.needed,
+          perViaA: item.perViaA,
+          ok: item.ok,
+        })),
+        powerFindings: coarse.findings.map((finding) => ({ ...finding })),
+        notes: [...budget.notes, ...coarse.notes],
       };
     },
   };
