@@ -37,6 +37,10 @@ export interface RoutingStats {
   readonly stairRuns: number;
   readonly badExits: number;
   readonly heavyViaNets: number;
+  /** 同网同层走线在顶点处的拐弯次数（不含共线接续）。 */
+  readonly bends: number;
+  /** 相邻两个拐点方向相反、中间段又短，构成 S 形折的次数。 */
+  readonly doglegs: number;
 }
 
 export interface RoutingReport {
@@ -62,6 +66,10 @@ export interface RoutingOptions {
   readonly padExitMax?: number;
   /** 单网过孔数上限（只对非电源信号网）。默认 2。 */
   readonly maxViasPerNet?: number;
+  /** 中间段短于这个长度、且两端转向相反的折，算 S 形 dogleg（mm）。默认 2。 */
+  readonly doglegMaxMm?: number;
+  /** 单网拐弯数超过这个值就点出来。默认 6。 */
+  readonly bendsPerNet?: number;
 }
 
 const EMPTY_STATS: RoutingStats = {
@@ -72,6 +80,8 @@ const EMPTY_STATS: RoutingStats = {
   stairRuns: 0,
   badExits: 0,
   heavyViaNets: 0,
+  bends: 0,
+  doglegs: 0,
 };
 
 export const EMPTY_ROUTING: RoutingReport = {
@@ -163,6 +173,8 @@ interface Numbers {
   padExitMin: number;
   padExitMax: number;
   maxViasPerNet: number;
+  doglegMaxMm: number;
+  bendsPerNet: number;
 }
 
 function numbersOf(options: RoutingOptions): Numbers {
@@ -175,7 +187,82 @@ function numbersOf(options: RoutingOptions): Numbers {
     padExitMin: options.padExitMin ?? 20,
     padExitMax: options.padExitMax ?? 70,
     maxViasPerNet: options.maxViasPerNet ?? 2,
+    doglegMaxMm: options.doglegMaxMm ?? 2,
+    bendsPerNet: options.bendsPerNet ?? 6,
   };
+}
+
+/**
+ * 拐弯次数与 S 形折。
+ *
+ * 「拐弯」按人眼的定义：同网同层的两条线在顶点相接、且方向不共线（>1°）。
+ * 「S 形」是相邻两个拐点转向相反、中间那段又短——人会把这种小折拉直，AI 常为了
+ * 躲开障碍先拐一下再拐回来。
+ */
+function checkBends(
+  tracks: readonly PcbTrackView[],
+  numbers: Numbers,
+  findings: RoutingFinding[],
+): { bends: number; doglegs: number } {
+  const vertices = vertexMap(tracks);
+  const turnByVertex = new Map<string, { turn: number; sign: number }>();
+  let bends = 0;
+  for (const slot of vertices.values()) {
+    if (slot.segments.length !== 2) continue;
+    const first = tracks[slot.segments[0]!]!;
+    const second = tracks[slot.segments[1]!]!;
+    if (first.net !== second.net || first.side !== second.side) continue;
+    const inA = other(first, slot.point);
+    const inB = other(second, slot.point);
+    const turn = turnOf(angleOf(slot.point, inA), angleOf(slot.point, inB));
+    if (turn <= 1) continue;
+    bends += 1;
+    const ax = slot.point.x - inA.x;
+    const ay = slot.point.y - inA.y;
+    const bx = inB.x - slot.point.x;
+    const by = inB.y - slot.point.y;
+    const cross = ax * by - ay * bx;
+    turnByVertex.set(keyOf(slot.point), { turn, sign: cross > 0 ? 1 : cross < 0 ? -1 : 0 });
+  }
+
+  // 中间段两端转向相反 + 段短 = S 形折
+  let doglegs = 0;
+  for (const track of tracks) {
+    if (lengthOf(track) >= numbers.doglegMaxMm) continue;
+    const start = turnByVertex.get(keyOf(startOf(track)));
+    const end = turnByVertex.get(keyOf(endOf(track)));
+    if (start === undefined || end === undefined) continue;
+    if (start.sign === 0 || end.sign === 0) continue;
+    if (start.sign === end.sign) continue;
+    if (start.turn < 15 || end.turn < 15) continue;
+    doglegs += 1;
+  }
+
+  if (numbers.bendsPerNet > 0) {
+    const perNet = new Map<string, number>();
+    for (const slot of vertices.values()) {
+      const seen = turnByVertex.get(keyOf(slot.point));
+      if (seen === undefined) continue;
+      const first = tracks[slot.segments[0]!]!;
+      perNet.set(first.net, (perNet.get(first.net) ?? 0) + 1);
+    }
+    let shown = 0;
+    for (const [net, count] of [...perNet.entries()].sort((a, b) => b[1] - a[1])) {
+      if (count < numbers.bendsPerNet || shown >= 5) break;
+      shown += 1;
+      findings.push({
+        id: "routing.many-bends",
+        severity: "info",
+        message: "网络 " + (net === "" ? "（未命名）" : net) + " 上拐了 " + String(count) + " 次：同一个网络本可以更直",
+        fix: "合并同一方向上的小折；如果是为了躲障碍，先看障碍能不能挪。",
+        net,
+        refs: [],
+        at: { x: 0, y: 0 },
+      });
+    }
+  }
+
+  return { bends, doglegs };
 }
 
 /**
@@ -417,6 +504,7 @@ export function analyzeRouting(scene: PcbScene, options: RoutingOptions = {}): R
   const stairRuns = checkStairs(tracks, numbers, findings);
   const badExits = checkPadExits(tracks, scene, numbers, findings);
   const heavyViaNets = checkVias(scene, numbers, findings);
+  const bent = checkBends(tracks, numbers, findings);
 
   const nets = new Set<string>();
   for (const track of tracks) if (track.net !== "") nets.add(track.net);
@@ -445,6 +533,8 @@ export function analyzeRouting(scene: PcbScene, options: RoutingOptions = {}): R
       stairRuns,
       badExits,
       heavyViaNets,
+      bends: bent.bends,
+      doglegs: bent.doglegs,
     },
     findings,
     notes,

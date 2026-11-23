@@ -3084,8 +3084,36 @@ test("布线工整度：直角、锐角、焊盘斜拉、单网多换孔各点�
   writeFileSync(empty, "(kicad_pcb (version 20241229) (generator pcbnew)\n  (net 0 \"\")\n)", "utf8");
   const bare = readRouting(empty);
   assert.equal(bare.stats.tracks, 0);
+  assert.equal(bare.stats.bends, 0);
   assert.equal(bare.ok, true);
   assert.equal(bare.notes.some((note) => note.includes("没有走线")), true);
+});
+
+test("布线工整度：拐弯次数与 S 形折分开数，直通不算（S244）", () => {
+  const dir = tempDir("ecad-bends-");
+  const file = join(dir, "board.kicad_pcb");
+  // N1 一条直通（不折）；N2 一个 45° 折（1 次拐弯、无 S 形）；N3 先拐再拐回、中间段 1 mm（S 形 1 处）
+  writeFileSync(
+    file,
+    "(kicad_pcb (version 20241229) (generator pcbnew)\n" +
+      '  (layers "F.Cu" "B.Cu")\n' +
+      '  (net 0 "")\n  (net 1 "STRAIGHT")\n  (net 2 "ONE_BEND")\n  (net 3 "S_JOG")\n' +
+      '  (segment (start 0 0) (end 10 0) (width 0.2) (layer "F.Cu") (net 1))\n' +
+      '  (segment (start 20 0) (end 25 0) (width 0.2) (layer "F.Cu") (net 2))\n' +
+      '  (segment (start 25 0) (end 30 5) (width 0.2) (layer "F.Cu") (net 2))\n' +
+      '  (segment (start 40 0) (end 45 5) (width 0.2) (layer "B.Cu") (net 3))\n' +
+      '  (segment (start 45 5) (end 46 5) (width 0.2) (layer "B.Cu") (net 3))\n' +
+      '  (segment (start 46 5) (end 46 10) (width 0.2) (layer "B.Cu") (net 3))\n' +
+      ")\n",
+    "utf8",
+  );
+  const report = readRouting(file);
+  assert.equal(report.ok, true, report.error);
+  assert.equal(report.stats.bends, 3, "N2 一处折 + N3 两处折，直通不算");
+  assert.equal(report.stats.doglegs, 1, "N3 的 1 mm 中间段两端转向相反，算一处 S 形");
+  const empty = join(dir, "empty.kicad_pcb");
+  writeFileSync(empty, '(kicad_pcb (version 20241229)\n  (layers "F.Cu" "B.Cu")\n  (net 0 "")\n)\n', "utf8");
+  assert.equal(readRouting(empty).stats.doglegs, 0);
 });
 
 test("改前改后：新增与删除的走线按层点出来，过孔单独算，方向写反不算改（S232）", () => {

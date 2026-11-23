@@ -2807,8 +2807,20 @@ export function registerPcbTools(ctx: DshContext): void {
           stairRuns: { type: "number" },
           badExits: { type: "number" },
           heavyViaNets: { type: "number" },
+          bends: { type: "number" },
+          doglegs: { type: "number" },
         },
-        required: ["tracks", "nets", "rightAngles", "acuteAngles", "stairRuns", "badExits", "heavyViaNets"],
+        required: [
+          "tracks",
+          "nets",
+          "rightAngles",
+          "acuteAngles",
+          "stairRuns",
+          "badExits",
+          "heavyViaNets",
+          "bends",
+          "doglegs",
+        ],
       },
       findings: {
         type: "array",
@@ -2851,7 +2863,17 @@ export function registerPcbTools(ctx: DshContext): void {
         const result = value as {
           ok: boolean;
           error: string;
-          stats: { tracks: number; nets: number; rightAngles: number; acuteAngles: number; stairRuns: number; badExits: number; heavyViaNets: number };
+          stats: {
+            tracks: number;
+            nets: number;
+            rightAngles: number;
+            acuteAngles: number;
+            stairRuns: number;
+            badExits: number;
+            heavyViaNets: number;
+            bends: number;
+            doglegs: number;
+          };
           findings: { severity: string; message: string; fix: string }[];
           notes: string[];
         };
@@ -2862,6 +2884,11 @@ export function registerPcbTools(ctx: DshContext): void {
             + String(stats.rightAngles) + " · 锐角 " + String(stats.acuteAngles) + " · 阶梯碎折 "
             + String(stats.stairRuns) + " · 焊盘斜拉 " + String(stats.badExits) + " · 多换层网 "
             + String(stats.heavyViaNets),
+          " · 拐弯 " +
+            String(stats.bends) +
+            "（S 形 " +
+            String(stats.doglegs) +
+            "）",
         ];
         const label: Record<string, string> = { error: "错误", warning: "告警", info: "提示" };
         const shown = result.findings.slice(0, 8);
@@ -2878,7 +2905,17 @@ export function registerPcbTools(ctx: DshContext): void {
         ok: false,
         error: "",
         boardFile: "",
-        stats: { tracks: 0, nets: 0, rightAngles: 0, acuteAngles: 0, stairRuns: 0, badExits: 0, heavyViaNets: 0 },
+        stats: {
+          tracks: 0,
+          nets: 0,
+          rightAngles: 0,
+          acuteAngles: 0,
+          stairRuns: 0,
+          badExits: 0,
+          heavyViaNets: 0,
+          bends: 0,
+          doglegs: 0,
+        },
         findings: [] as Array<Record<string, unknown>>,
         notes: [] as string[],
       };

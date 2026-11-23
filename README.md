@@ -118,7 +118,7 @@ dsh plugin --profile desktop add dsh-ecad
 | `stm32_pcb_diff` | 改前改后对比：逐层列新增/删除的走线与过孔，写同原点叠图（红=删除、绿=新增） |
 | `stm32_pcb_layers` | 逐层物理图：每层铜一张 SVG，只留板面、原点与比例一致，可改前改后叠图 |
 | `stm32_ecad_verify` | 交付包身份复核：路径、重名、CRC/sha256、清单首项与计数 |
-| `stm32_pcb_routing` | 布线工整度：直角与锐角折返、连续短折、焊盘斜向引出、单网过多换层 |
+| `stm32_pcb_routing` | 布线工整度：直角与锐角折返、连续短折、焊盘斜向引出、单网过多换层、拐弯次数与 S 形折 |
 | `stm32_power` | 功耗与电源树电流预算（只合计填的电流，估算单列） |
 | `stm32_bom` | BOM 分组与元件成本；`prices: true` 才联网取立创报价 |
 | `stm32_brief` | 生成 `docs/01-MRD.md`、`02-hardware-PRD.md`、`03-design-brief.md` 骨架（事实自动填，需求留待定） |
