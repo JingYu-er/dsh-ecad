@@ -105,7 +105,7 @@ Nothing is guessed: `jlcpcb:C<code>` in the source decides the BOM part, the foo
 
 ### Checks and cost
 
-`stm32_netgate`, `stm32_emc`, `stm32_pcb_layout`, `stm32_pcb_routing`, `stm32_pcb_links`, `stm32_power`, `stm32_bom`, `stm32_brief`, `stm32_symbol_footprint`, `stm32_ecad_verify`, `stm32_pcb_reference`, `stm32_pcb_bus`, `stm32_pcb_silk`, `stm32_pcb_diff`, `stm32_pcb_layers`.
+`stm32_netgate`, `stm32_emc`, `stm32_pcb_layout`, `stm32_pcb_routing`, `stm32_pcb_links`, `stm32_power`, `stm32_bom`, `stm32_brief`, `stm32_symbol_footprint`, `stm32_ecad_verify`, `stm32_pcb_reference`, `stm32_pcb_bus`, `stm32_pcb_silk`, `stm32_pcb_candidates`, `stm32_pcb_diff`, `stm32_pcb_layers`.
 
 ### Parts and datasheets
 

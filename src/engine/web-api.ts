@@ -76,6 +76,7 @@ import { readRouting } from "./ecad/pcb/routing.js";
 import { readReference } from "./ecad/pcb/reference.js";
 import { readBuses } from "./ecad/pcb/bus.js";
 import { readSilk } from "./ecad/pcb/silk.js";
+import { compareCandidates } from "./ecad/pcb/candidates.js";
 import { EMPTY_DIFF, EMPTY_DIFF_SVG, readDiff, writeDiffSvgs } from "./ecad/pcb/diff.js";
 import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "./ecad/pcb/layers.js";
@@ -347,6 +348,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/reference",
   WEB_API_PREFIX + "/ecad/bus",
   WEB_API_PREFIX + "/ecad/silk",
+  WEB_API_PREFIX + "/ecad/candidates",
   WEB_API_PREFIX + "/ecad/diff",
   WEB_API_PREFIX + "/ecad/verify-bundle",
   WEB_API_PREFIX + "/ecad/layers",
@@ -629,6 +631,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/reference" &&
     path !== WEB_API_PREFIX + "/ecad/bus" &&
     path !== WEB_API_PREFIX + "/ecad/silk" &&
+    path !== WEB_API_PREFIX + "/ecad/candidates" &&
     path !== WEB_API_PREFIX + "/ecad/diff" &&
     path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
     path !== WEB_API_PREFIX + "/ecad/layers" &&
@@ -1549,6 +1552,30 @@ export async function handleWebApi(input: {
         notes: [...report.notes],
       },
     });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/candidates") {
+    // 候选比较记录（S240）：给基线与若干候选，列几何改变与判据增减。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const baseline = typeof query["baselineFile"] === "string" ? query["baselineFile"].trim() : "";
+    const listed = typeof query["candidates"] === "string" ? query["candidates"].split(",").map((item) => item.trim()).filter((item) => item !== "") : [];
+    if (baseline === "" || listed.length === 0) return fail(400, "baselineFile 与 candidates 都要给：候选比较得有基线和至少一个候选。");
+    const layout = resolveProjectLayout(projectDir);
+    const workspace = planEcadWorkspace(projectDir, layout.hardwareDir);
+    const baselineFile = resolve(projectDir, baseline);
+    if (!existsSync(baselineFile)) return fail(404, "找不到基线板子：" + baselineFile);
+    const files = listed.map((item) => resolve(projectDir, item));
+    const missing = files.find((item) => !existsSync(item));
+    if (missing !== undefined) return fail(404, "找不到候选板子：" + missing);
+    const report = compareCandidates(baselineFile, readFileSync(baselineFile, "utf8"), files.map((file) => ({ file })));
+    if (!report.ok) return fail(422, report.error);
+    const dir = join(workspace.outDir, "candidates");
+    mkdirSync(dir, { recursive: true });
+    const reportFile = join(dir, "report.md");
+    writeFileSync(reportFile, report.markdown, "utf8");
+    return ok({ candidates: { ok: true, error: "", baselineFile, reportFile, rows: report.rows, notes: report.notes } });
   }
 
   if (path === WEB_API_PREFIX + "/ecad/silk") {

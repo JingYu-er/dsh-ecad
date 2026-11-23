@@ -48,6 +48,7 @@ import { readRouting } from "../engine/ecad/pcb/routing.js";
 import { readReference } from "../engine/ecad/pcb/reference.js";
 import { readBuses, type BusReport } from "../engine/ecad/pcb/bus.js";
 import { readSilk } from "../engine/ecad/pcb/silk.js";
+import { compareCandidates } from "../engine/ecad/pcb/candidates.js";
 import { readDiff, renderDiffHtml, renderDiffSvg, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
@@ -80,6 +81,7 @@ export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
 export const PCB_REFERENCE_TOOL = "stm32_pcb_reference";
 export const PCB_BUS_TOOL = "stm32_pcb_bus";
 export const PCB_SILK_TOOL = "stm32_pcb_silk";
+export const PCB_CANDIDATES_TOOL = "stm32_pcb_candidates";
 /** 改前改后对比（S232）：逐层列新增/删除的走线与过孔，并写同原点叠图。 */
 export const PCB_DIFF_TOOL = "stm32_pcb_diff";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
@@ -2960,6 +2962,134 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     required: ["ok", "error", "boardFile", "stats", "planes", "findings", "notes"],
   };
+
+  const candidatesOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      baselineFile: { type: "string" },
+      reportFile: { type: "string" },
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            label: { type: "string" },
+            file: { type: "string" },
+            verdict: { type: "string" },
+            score: { type: "number" },
+            addedSegments: { type: "number" },
+            removedSegments: { type: "number" },
+            addedMm: { type: "number" },
+            removedMm: { type: "number" },
+            gaps: { type: "number" },
+            acuteAngles: { type: "number" },
+            busUneven: { type: "number" },
+          },
+          required: [
+            "label",
+            "file",
+            "verdict",
+            "score",
+            "addedSegments",
+            "removedSegments",
+            "addedMm",
+            "removedMm",
+            "gaps",
+            "acuteAngles",
+            "busUneven",
+          ],
+        },
+      },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "baselineFile", "reportFile", "rows", "notes"],
+  };
+
+  const candidatesTool: ToolDefinition = {
+    name: PCB_CANDIDATES_TOOL,
+    description:
+      "候选比较：给一个基线与若干候选板，列出真实几何改变与判据增减（缺口/锐角/阶梯/斜拉/总线不等距），写一份可粘进记录的 Markdown。只读，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        baselineFile: { type: "string", description: "基线板子（相对工程目录或绝对路径）。" },
+        candidates: {
+          type: "array",
+          items: { type: "string" },
+          description: "候选板子，按顺序比较；至少一个。",
+        },
+      },
+      required: ["baselineFile", "candidates"],
+    },
+    output: {
+      schema: candidatesOutput,
+      render: (result: Record<string, unknown>) => {
+        const rows = result.rows as Array<{ label: string; verdict: string; score: number; addedSegments: number; removedSegments: number; gaps: number; acuteAngles: number }>;
+        const lines: string[] = [];
+        lines.push("候选比较（基线 " + String(result.baselineFile) + "）");
+        for (const row of rows) {
+          lines.push(
+            "- " + row.label + "：" + row.verdict + "（加权 " + (row.score > 0 ? "+" : "") + String(row.score) +
+              "），+" + String(row.addedSegments) + " / -" + String(row.removedSegments) +
+              " 段，缺口 " + String(row.gaps) + "、锐角 " + String(row.acuteAngles),
+          );
+        }
+        lines.push("记录文件：" + String(result.reportFile));
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 120_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; baselineFile: string; candidates: string[] }, exec: ToolExec) => {
+      const empty = { ok: false, error: "", baselineFile: "", reportFile: "", rows: [] as Array<Record<string, unknown>>, notes: [] as string[] };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      const baselineFile = resolve(resolved.projectDir, args.baselineFile);
+      if (!existsSync(baselineFile)) return { ...empty, error: "找不到基线板子：" + baselineFile };
+      if (args.candidates.length === 0) return { ...empty, error: "candidates 至少要一个板子" };
+      const layout = resolveProjectLayout(resolved.projectDir);
+      const workspace = planEcadWorkspace(resolved.projectDir, layout.hardwareDir);
+      const missing = args.candidates.map((item) => resolve(resolved.projectDir, item)).find((item) => !existsSync(item));
+      if (missing !== undefined) return { ...empty, error: "找不到候选板子：" + missing };
+      const report = compareCandidates(
+        baselineFile,
+        readFileSync(baselineFile, "utf8"),
+        args.candidates.map((item) => ({ file: resolve(resolved.projectDir, item) })),
+      );
+      if (!report.ok) return { ...empty, baselineFile, error: report.error };
+      const dir = join(workspace.outDir, "candidates");
+      mkdirSync(dir, { recursive: true });
+      const reportFile = join(dir, "report.md");
+      writeFileSync(reportFile, report.markdown, "utf8");
+      return {
+        ok: true,
+        error: "",
+        baselineFile: report.baselineFile,
+        reportFile,
+        rows: report.rows.map((row) => ({
+          label: row.label,
+          file: row.file,
+          verdict: row.verdict,
+          score: row.score,
+          addedSegments: row.addedSegments,
+          removedSegments: row.removedSegments,
+          addedMm: row.addedMm,
+          removedMm: row.removedMm,
+          gaps: row.gaps,
+          acuteAngles: row.acuteAngles,
+          busUneven: row.busUneven,
+        })),
+        notes: [...report.notes],
+      };
+    },
+  };
+  ctx.tools.register(candidatesTool);
 
   const silkOutput: JsonSchema = {
     type: "object",

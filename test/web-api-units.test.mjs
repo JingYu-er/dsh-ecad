@@ -119,8 +119,8 @@ test("handleWebApi：GET /config 返回快照，方法不对 405", async () => {
 
 
 test("WEB_API_PATHS：四十一条路由都在前缀下，且没有重复", () => {
-  assert.equal(WEB_API_PATHS.length, 43);
-  assert.equal(new Set(WEB_API_PATHS).size, 43);
+  assert.equal(WEB_API_PATHS.length, 44);
+  assert.equal(new Set(WEB_API_PATHS).size, 44);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/power"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/brief"), true);
   assert.equal(WEB_API_PATHS.includes(WEB_API_PREFIX + "/ecad/mech"), true);
@@ -710,7 +710,7 @@ test("registerWebRoutes：host 的 dispatch 表里真的有板图路由（S151 �
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad/glb"), true, "少了这条，3D 实体拿不到 GLB");
   assert.equal(registered.includes(WEB_API_PREFIX + "/viewer.js"), true, "少了这条，three 视图脚本拿不到");
   // JSON 路由 36 条 + 二进制路由 2 条（GLB 与 viewer.js）。
-  assert.equal(registered.length, 45);
+  assert.equal(registered.length, 46);
   assert.equal(registered.includes(WEB_API_PREFIX + "/ecad"), true);
 });
 
