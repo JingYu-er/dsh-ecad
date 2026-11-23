@@ -1777,6 +1777,61 @@ test("制造文件回看：Gerber 的线/焊盘/区域与 Excellon 的孔都对�
   }
 });
 
+test("槽孔与锡膏压孔：G85 与 M15 路由都算槽，锡膏开窗盖住孔就报（S233）", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dsh-gerber-slots-"));
+  try {
+    const head = [
+      "%TF.GenerationSoftware,KiCad,Pcbnew,10.0.7*%",
+      "%FSLAX46Y46*%",
+      "%MOMM*%",
+      "%LPD*%",
+      "G01*",
+    ];
+    // 顶层铜：一个 0.6 mm 的焊盘，正好在槽孔端点上（只为让图有铜）。
+    writeFileSync(join(dir, "b-F_Cu.gtl"), [...head, "%ADD10C,0.600000*%", "D10*", "X10000000Y-20000000D03*", "M02*"].join("\n"));
+    // 锡膏：一个 2×2 mm 的开窗，中心压在 X10/Y-20 的孔上。
+    writeFileSync(join(dir, "b-F_Paste.gtp"), [...head, "%ADD11R,2.000000X2.000000*%", "D11*", "X10000000Y-20000000D03*", "M02*"].join("\n"));
+    writeFileSync(join(dir, "b-Edge_Cuts.gm1"), [...head, "X0Y0D02*", "X20000000Y0D01*", "X20000000Y-20000000D01*", "X0Y-20000000D01*", "X0Y0D01*", "M02*"].join("\n"));
+    // 钻孔：1 个圆孔 + 1 个 G85 两点槽 + 1 段 M15 路由槽。
+    writeFileSync(
+      join(dir, "b.drl"),
+      [
+        "M48",
+        "METRIC",
+        "T1C0.400",
+        "T2C0.600",
+        "%",
+        "G90",
+        "T1",
+        "X10.0Y-20.0",
+        "X12.0Y-20.0G85X14.0Y-20.0",
+        "T2",
+        "M15",
+        "X5.0Y-5.0",
+        "G01X8.0Y-5.0",
+        "M16",
+        "M30",
+      ].join("\n"),
+    );
+    const view = readGerberSet(dir);
+    assert.equal(view.ok, true, view.error);
+    assert.equal(view.holes.round, 1);
+    assert.equal(view.holes.slots, 2);
+    assert.equal(view.holes.smallestMm, 0.4);
+    assert.equal(view.holes.largestMm, 0.6);
+    assert.deepEqual(
+      view.holes.diameters.map((item) => item.d + ":" + item.count),
+      ["0.4:2", "0.6:1"],
+    );
+    // 圆孔落在锡膏开窗里 → 一条 warning；槽孔在 (12,-20)→(14,-20)，不在开窗内。
+    const pasteHit = view.findings.filter((item) => item.id === "gerber.paste-over-hole");
+    assert.equal(pasteHit.length, 1);
+    assert.match(pasteHit[0].message, /1 处/u);
+    assert.match(view.svg, /stroke-linecap="round"/u);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 test("EMC 深度体检：差分对间距、回流覆盖、串扰都不算差分对内部（S167）", () => {
   const board = [
     "(kicad_pcb",

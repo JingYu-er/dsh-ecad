@@ -7,6 +7,11 @@
  * Excellon 的 T 刀具与 XY 孔位。
  *
  * 读不懂的构造（多边形光圈、LPC 挖空、宏光圈）不猜，计入 notes 明说「没有画」。
+ *
+ * 交付前还要回答两个问题（S233，外部技能文档 §8）：槽孔与圆孔各多少、锡膏有没有压在孔上。
+ * 槽孔在 Excellon 里有两种写法：`X..Y..G85X..Y..`（两点一槽）与 M15/M16 路由模式
+ * （M15 落刀、G01 走刀、M16 抬刀）。两种都按「起点 + 终点 + 刀具直径」记，画成粗线。
+ * 锡膏压孔：钻孔中心落在锡膏开窗里，回流时锡会被抽走——这条不是几何错误，是工艺问题。
  */
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -24,6 +29,31 @@ export interface GerberLayerView {
   readonly skipped: number;
 }
 
+export interface GerberHoleView {
+  readonly x: number;
+  readonly y: number;
+  readonly d: number;
+  /** 槽孔才有：另一个端点；圆孔为 null。 */
+  readonly to: { readonly x: number; readonly y: number } | null;
+}
+
+export interface GerberHoleStats {
+  readonly round: number;
+  readonly slots: number;
+  readonly smallestMm: number;
+  readonly largestMm: number;
+  readonly diameters: { readonly d: number; readonly count: number }[];
+}
+
+export interface GerberFinding {
+  readonly id: string;
+  readonly severity: "warning" | "info";
+  readonly message: string;
+  readonly fix: string;
+}
+
+export const EMPTY_HOLES: GerberHoleStats = { round: 0, slots: 0, smallestMm: 0, largestMm: 0, diameters: [] };
+
 export interface GerberView {
   readonly ok: boolean;
   readonly error: string;
@@ -33,6 +63,8 @@ export interface GerberView {
   readonly widthMm: number;
   readonly heightMm: number;
   readonly drillHoles: number;
+  readonly holes: GerberHoleStats;
+  readonly findings: GerberFinding[];
   readonly notes: string[];
 }
 
@@ -52,6 +84,8 @@ const EMPTY: GerberView = {
   widthMm: 0,
   heightMm: 0,
   drillHoles: 0,
+  holes: EMPTY_HOLES,
+  findings: [],
   notes: [],
 };
 
@@ -70,7 +104,11 @@ interface LayerDraw {
   skipped: number;
 }
 
-type Aperture = { shape: "circle"; size: number } | { shape: "rect"; w: number; h: number } | { shape: "obround"; w: number; h: number } | { shape: "other" };
+type Aperture =
+  | { shape: "circle"; size: number }
+  | { shape: "rect"; w: number; h: number; rotation: number }
+  | { shape: "obround"; w: number; h: number }
+  | { shape: "other" };
 
 interface ParsedLayer {
   readonly draw: LayerDraw;
@@ -95,7 +133,7 @@ export function readGerberSet(dir: string, options: GerberOptions = {}): GerberV
   if (files.length === 0) return { ...EMPTY, dir, error: "这个目录里没有 Gerber 文件：先跑一次 stm32_ecad_export" };
 
   const layers: LayerDraw[] = [];
-  const holes: { x: number; y: number; d: number }[] = [];
+  const holes: GerberHoleView[] = [];
   const notes: string[] = [];
   let drillHoles = 0;
   for (const file of files) {
@@ -119,12 +157,12 @@ export function readGerberSet(dir: string, options: GerberOptions = {}): GerberV
     for (const note of parsed.notes) notes.push(file + "：" + note);
   }
   if (layers.length === 0) return { ...EMPTY, dir, error: "只找到钻孔文件：铜层与板框一个都没读到" };
-  return render(wanted.length === 0 ? layers : layers, holes, options, dir, drillHoles, notes);
+  return render(layers, holes, options, dir, drillHoles, notes);
 }
 
 function render(
   layers: readonly LayerDraw[],
-  holes: readonly { x: number; y: number; d: number }[],
+  holes: readonly GerberHoleView[],
   options: GerberOptions,
   dir: string,
   drillHoles: number,
@@ -153,7 +191,10 @@ function render(
     for (const circle of layer.circles) grow(circle.x, circle.y, circle.r);
     for (const polygon of layer.polygons) for (const point of polygon.points) grow(point.x, point.y, 0);
   }
-  for (const hole of holes) grow(hole.x, hole.y, hole.d / 2);
+  for (const hole of holes) {
+    grow(hole.x, hole.y, hole.d / 2);
+    if (hole.to !== null) grow(hole.to.x, hole.to.y, hole.d / 2);
+  }
   if (minX === Number.POSITIVE_INFINITY) return { ...EMPTY, dir, error: "这些 Gerber 里没有任何可画的图元" };
   const marginMm = 1.2;
   minX -= marginMm;
@@ -216,10 +257,19 @@ function render(
   }
   if (holes.length > 0) {
     parts.push('<g data-layer="DRILL">');
+    const holeFill = "var(--dsw-alias-bg-base,#111)";
+    const holeStroke = "var(--dsw-alias-label-dimmed,#6b7280)";
     for (const hole of holes) {
+      if (hole.to !== null) {
+        parts.push(
+          '<line x1="' + hole.x.toFixed(3) + '" y1="' + hole.y.toFixed(3) + '" x2="' + hole.to.x.toFixed(3) + '" y2="' + hole.to.y.toFixed(3) +
+            '" stroke="' + holeFill + '" stroke-width="' + hole.d.toFixed(3) + '" stroke-linecap="round"/>',
+        );
+        continue;
+      }
       parts.push(
         '<circle cx="' + hole.x.toFixed(3) + '" cy="' + hole.y.toFixed(3) + '" r="' + (hole.d / 2).toFixed(3) +
-          '" fill="var(--dsw-alias-bg-base,#111)" stroke="var(--dsw-alias-label-dimmed,#6b7280)" stroke-width="0.05"/>',
+          '" fill="' + holeFill + '" stroke="' + holeStroke + '" stroke-width="0.05"/>',
       );
     }
     parts.push("</g>");
@@ -242,8 +292,88 @@ function render(
     widthMm: Math.round(widthMm * 100) / 100,
     heightMm: Math.round(heightMm * 100) / 100,
     drillHoles,
+    holes: holeStats(holes),
+    findings: checkDrills(holes, layers),
     notes,
   };
+}
+
+function holeStats(holes: readonly GerberHoleView[]): GerberHoleStats {
+  if (holes.length === 0) return EMPTY_HOLES;
+  const counts = new Map<number, number>();
+  let round = 0;
+  let slots = 0;
+  let smallest = Number.POSITIVE_INFINITY;
+  let largest = 0;
+  for (const hole of holes) {
+    if (hole.to === null) round += 1;
+    else slots += 1;
+    const d = Math.round(hole.d * 1000) / 1000;
+    counts.set(d, (counts.get(d) ?? 0) + 1);
+    smallest = Math.min(smallest, hole.d);
+    largest = Math.max(largest, hole.d);
+  }
+  return {
+    round,
+    slots,
+    smallestMm: Math.round(smallest * 1000) / 1000,
+    largestMm: Math.round(largest * 1000) / 1000,
+    diameters: [...counts.entries()].sort((a, b) => a[0] - b[0]).map(([d, count]) => ({ d, count })),
+  };
+}
+
+/** 点是否落在某个光圈图元里（矩形按自身旋转反算）。 */
+function insideShape(point: { x: number; y: number }, draw: LayerDraw): boolean {
+  for (const circle of draw.circles) {
+    if (Math.hypot(point.x - circle.x, point.y - circle.y) <= circle.r + 0.001) return true;
+  }
+  for (const rect of draw.rects) {
+    const angle = (-rect.rotation * Math.PI) / 180;
+    const dx = point.x - rect.x;
+    const dy = point.y - rect.y;
+    const lx = dx * Math.cos(angle) - dy * Math.sin(angle);
+    const ly = dx * Math.sin(angle) + dy * Math.cos(angle);
+    if (Math.abs(lx) <= rect.w / 2 + 0.001 && Math.abs(ly) <= rect.h / 2 + 0.001) return true;
+  }
+  return false;
+}
+
+/**
+ * 钻孔与锡膏的关系：孔心落在锡膏开窗里，回流时锡会被抽走。
+ * 只看孔心，槽孔取两端与中点——过孔被锡膏覆盖时板厂通常会要求塞孔。
+ */
+function checkDrills(holes: readonly GerberHoleView[], layers: readonly LayerDraw[]): GerberFinding[] {
+  const findings: GerberFinding[] = [];
+  const paste = layers.filter((layer) => layer.kind === "paste");
+  if (paste.length === 0 || holes.length === 0) return findings;
+  const hit: string[] = [];
+  for (const hole of holes) {
+    const points = hole.to === null ? [hole] : [hole, { x: (hole.x + hole.to.x) / 2, y: (hole.y + hole.to.y) / 2 }];
+    for (const layer of paste) {
+      if (points.some((point) => insideShape(point, layer))) {
+        hit.push(hole.to === null ? "Ø" + String(hole.d) : "槽 " + String(hole.d));
+        break;
+      }
+    }
+  }
+  if (hit.length > 0) {
+    findings.push({
+      id: "gerber.paste-over-hole",
+      severity: "warning",
+      message: "有 " + String(hit.length) + " 处钻孔落在锡膏开窗里（" + hit.slice(0, 4).join("、") + (hit.length > 4 ? " 等" : "") + "）：回流时锡会从孔里流走。",
+      fix: "把这几处的锡膏开窗改小或挪开；确实要盖住就做塞孔+盖油，并在交接说明里写清。",
+    });
+  }
+  const skipped = layers.filter((layer) => layer.skipped > 0);
+  if (skipped.length > 0) {
+    findings.push({
+      id: "gerber.skipped-constructs",
+      severity: "info",
+      message: "有 " + String(skipped.length) + " 层的部分构造没画（多是多边形光圈或宏光圈）：" + skipped.slice(0, 3).map((layer) => layer.name + " " + String(layer.skipped) + " 处").join("、") + "。",
+      fix: "这张图只用于人工核对；要逐处确认请用 CAM 工具打开原始 Gerber。",
+    });
+  }
+  return findings;
 }
 
 function rank(kind: GerberKind): number {
@@ -313,14 +443,16 @@ function parseGerber(text: string, file: string): ParsedLayer {
       } else if (command.startsWith("MOIN")) {
         unitScale = 25.4;
       } else if (command.startsWith("ADD")) {
-        const m = /^ADD(\d+)([A-Za-z_]+),?([\d.X]*)$/u.exec(command);
+        // 宏光圈的角点坐标可能带负号，字符类必须收 - ，否则整条 ADD 匹配失败、光圈退化成「不支持」。
+        const m = /^ADD(\d+)([A-Za-z_]+),?([\d.X-]*)$/u.exec(command);
         if (m === null) continue;
         const id = m[1] as string;
         const shape = (m[2] as string).toUpperCase();
         const params = (m[3] ?? "").split("X").filter((item) => item !== "").map(Number);
         if (shape === "C" && params.length >= 1) apertures.set(id, { shape: "circle", size: params[0] as number });
-        else if (shape === "R" && params.length >= 2) apertures.set(id, { shape: "rect", w: params[0] as number, h: params[1] as number });
+        else if (shape === "R" && params.length >= 2) apertures.set(id, { shape: "rect", w: params[0] as number, h: params[1] as number, rotation: 0 });
         else if (shape === "O" && params.length >= 2) apertures.set(id, { shape: "obround", w: params[0] as number, h: params[1] as number });
+        else if (shape === "ROUNDRECT") apertures.set(id, roundedRect(params));
         else apertures.set(id, { shape: "other" });
       } else if (command.startsWith("LP")) {
         polarityClear = command.startsWith("LPC");
@@ -432,6 +564,34 @@ function parseGerber(text: string, file: string): ParsedLayer {
   return { draw, holes: [], notes: [...new Set(notes)] };
 }
 
+/**
+ * KiCad 的 RoundRect 宏光圈：参数是 [圆角半径, x1,y1 … x4,y4, 旋转角]。
+ * 四个角是矩形本体（不含圆角）的顶点，圆角是在每个角上画半径 r 的圆、边线附近画宽 2r 的矩形，
+ * 所以实际开口的包围盒是本体外扩 r。这里按「外扩 r 的矩形 + 旋转角」近似——画图与判孔都够用。
+ */
+function roundedRect(params: readonly number[]): Aperture {
+  const radius = params[0] ?? 0;
+  const corners: { x: number; y: number }[] = [];
+  for (let index = 1; index + 1 < params.length - 1; index += 2) {
+    corners.push({ x: params[index] as number, y: params[index + 1] as number });
+  }
+  if (corners.length < 4) return { shape: "other" };
+  const rotation = (params[params.length - 1] ?? 0) % 360;
+  const angle = (-rotation * Math.PI) / 180;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (const corner of corners) {
+    const local = { x: corner.x * Math.cos(angle) - corner.y * Math.sin(angle), y: corner.x * Math.sin(angle) + corner.y * Math.cos(angle) };
+    minX = Math.min(minX, local.x);
+    maxX = Math.max(maxX, local.x);
+    minY = Math.min(minY, local.y);
+    maxY = Math.max(maxY, local.y);
+  }
+  return { shape: "rect", w: maxX - minX + radius * 2, h: maxY - minY + radius * 2, rotation };
+}
+
 function flash(
   draw: LayerDraw,
   aperture: Aperture | null,
@@ -448,7 +608,13 @@ function flash(
   if (aperture.shape === "circle") {
     draw.circles.push({ x: x * unitScale, y: y * unitScale, r: (aperture.size / 2) * unitScale });
   } else {
-    draw.rects.push({ x: x * unitScale, y: y * unitScale, w: aperture.w * unitScale, h: aperture.h * unitScale, rotation: 0 });
+    draw.rects.push({
+      x: x * unitScale,
+      y: y * unitScale,
+      w: aperture.w * unitScale,
+      h: aperture.h * unitScale,
+      rotation: aperture.shape === "rect" ? aperture.rotation : 0,
+    });
   }
   draw.flashes += 1;
 }
@@ -502,13 +668,14 @@ function arcPoints(
 }
 
 /** Excellon：只认 KiCad 写的 T 刀具 + 绝对坐标 XY + G90，单位取 METRIC/INCH。 */
-function parseExcellon(text: string): { holes: { x: number; y: number; d: number }[]; notes: string[] } {
+function parseExcellon(text: string): { holes: GerberHoleView[]; notes: string[] } {
   const notes: string[] = [];
   const tools = new Map<string, number>();
-  const holes: { x: number; y: number; d: number }[] = [];
+  const holes: GerberHoleView[] = [];
   let unit = 1; // mm
   let current = "";
   let routing = false;
+  let last: { x: number; y: number } | null = null;
   for (const raw of text.split(/\r?\n/u)) {
     const line = raw.trim();
     if (line === "" || line.startsWith(";")) continue;
@@ -526,7 +693,14 @@ function parseExcellon(text: string): { holes: { x: number; y: number; d: number
       continue;
     }
     if (/^G0?0/u.test(line)) {
+      // G00 是快速定位：路由模式下是抬刀走空程，不产生槽。
       routing = true;
+      last = null;
+      continue;
+    }
+    if (/^M16/u.test(line)) {
+      routing = false;
+      last = null;
       continue;
     }
     const tool = /^T(\d+)C([\d.]+)$/u.exec(line);
@@ -539,14 +713,32 @@ function parseExcellon(text: string): { holes: { x: number; y: number; d: number
       current = select[1] as string;
       continue;
     }
+    // 两点一槽：X..Y..G85X..Y..（KiCad 的椭圆孔就是这么写的）
+    const slot = /^X(-?[\d.]+)Y(-?[\d.]+)G85X(-?[\d.]+)Y(-?[\d.]+)$/u.exec(line);
+    if (slot !== null) {
+      const d = tools.get(current) ?? 0;
+      const x1 = Number(slot[1]) * unit;
+      const y1 = Number(slot[2]) * unit;
+      const x2 = Number(slot[3]) * unit;
+      const y2 = Number(slot[4]) * unit;
+      if (d > 0) holes.push({ x: x1, y: y1, d: d * unit, to: { x: x2, y: y2 } });
+      else notes.push("槽孔没有刀具直径，跳过");
+      last = { x: x2, y: y2 };
+      continue;
+    }
     const hit = /^X(-?[\d.]+)Y(-?[\d.]+)$/u.exec(line);
     if (hit !== null) {
+      const x = Number(hit[1]) * unit;
+      const y = Number(hit[2]) * unit;
+      const d = tools.get(current) ?? 0;
+      // 路由模式（M15 落刀后的 G01 走刀）里每一次移动都是一段槽；M15 之后的第一个点位是起点。
       if (routing) {
-        notes.push("铣槽（G05）里的一段没有画");
+        if (last !== null && d > 0) holes.push({ x: last.x, y: last.y, d: d * unit, to: { x, y } });
+        last = { x, y };
         continue;
       }
-      const d = tools.get(current) ?? 0;
-      if (d > 0) holes.push({ x: Number(hit[1]) * unit, y: Number(hit[2]) * unit, d: d * unit });
+      if (d > 0) holes.push({ x, y, d: d * unit, to: null });
+      last = { x, y };
       continue;
     }
   }

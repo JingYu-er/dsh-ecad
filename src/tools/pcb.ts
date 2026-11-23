@@ -2124,6 +2124,35 @@ export function registerPcbTools(ctx: DshContext): void {
       widthMm: { type: "number" },
       heightMm: { type: "number" },
       drillHoles: { type: "number" },
+      holes: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          round: { type: "number" },
+          slots: { type: "number" },
+          smallestMm: { type: "number" },
+          largestMm: { type: "number" },
+          diameters: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: { d: { type: "number" }, count: { type: "number" } },
+              required: ["d", "count"],
+            },
+          },
+        },
+        required: ["round", "slots", "smallestMm", "largestMm", "diameters"],
+      },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: { id: { type: "string" }, severity: { type: "string" }, message: { type: "string" }, fix: { type: "string" } },
+          required: ["id", "severity", "message", "fix"],
+        },
+      },
       layers: {
         type: "array",
         items: {
@@ -2143,7 +2172,7 @@ export function registerPcbTools(ctx: DshContext): void {
       },
       notes: { type: "array", items: { type: "string" } },
     },
-    required: ["ok", "error", "dir", "savedTo", "bytes", "widthMm", "heightMm", "drillHoles", "layers", "notes"],
+    required: ["ok", "error", "dir", "savedTo", "bytes", "widthMm", "heightMm", "drillHoles", "holes", "findings", "layers", "notes"],
   };
 
   const gerberTool: ToolDefinition = {
@@ -2174,14 +2203,18 @@ export function registerPcbTools(ctx: DshContext): void {
           widthMm: number;
           heightMm: number;
           drillHoles: number;
+          holes: { round: number; slots: number; smallestMm: number; largestMm: number; diameters: { d: number; count: number }[] };
+          findings: { id: string; severity: string; message: string; fix: string }[];
           layers: { name: string; kind: string; segments: number; flashes: number; regions: number; skipped: number }[];
           notes: string[];
         };
         if (!result.ok) return [{ type: "text", text: "制造文件回看失败：" + result.error }];
         const lines: string[] = [
-          "制造文件：" + String(result.widthMm) + " × " + String(result.heightMm) + " mm，钻孔 " + String(result.drillHoles) + " 个",
+          "制造文件：" + String(result.widthMm) + " × " + String(result.heightMm) + " mm，钻孔 " + String(result.drillHoles) + " 个（圆 " +
+            String(result.holes.round) + " · 槽 " + String(result.holes.slots) + "；Ø" + String(result.holes.smallestMm) + "–" + String(result.holes.largestMm) + " mm）",
           "SVG：" + result.savedTo + "（" + String(Math.round(result.bytes / 1024)) + " KB）",
         ];
+        for (const finding of result.findings) lines.push((finding.severity === "warning" ? "注意 " : "提示 ") + finding.message + " 修法：" + finding.fix);
         for (const layer of result.layers) {
           if (layer.segments === 0 && layer.flashes === 0 && layer.regions === 0 && layer.skipped === 0) continue;
           lines.push(
@@ -2205,6 +2238,8 @@ export function registerPcbTools(ctx: DshContext): void {
         widthMm: 0,
         heightMm: 0,
         drillHoles: 0,
+        holes: { round: 0, slots: 0, smallestMm: 0, largestMm: 0, diameters: [] },
+        findings: [] as Array<Record<string, unknown>>,
         layers: [] as Array<Record<string, unknown>>,
         notes: [] as string[],
       };
@@ -2228,6 +2263,8 @@ export function registerPcbTools(ctx: DshContext): void {
         widthMm: view.widthMm,
         heightMm: view.heightMm,
         drillHoles: view.drillHoles,
+        holes: view.holes,
+        findings: view.findings.map((item) => ({ ...item })),
         layers: view.layers.map((item) => ({ ...item })),
         notes: [...view.notes],
       };
