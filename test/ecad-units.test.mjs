@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { coverageOf } from "../lib/engine/ecad/pcb/coverage.js";
 import { analyzeReference } from "../lib/engine/ecad/pcb/reference.js";
+import { analyzeDiff, renderDiffSvg } from "../lib/engine/ecad/pcb/diff.js";
 import { readRouting } from "../lib/engine/ecad/pcb/routing.js";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3032,6 +3033,46 @@ test("布线工整度：直角、锐角、焊盘斜拉、单网多换孔各点�
   assert.equal(bare.notes.some((note) => note.includes("没有走线")), true);
 });
 
+test("改前改后：新增与删除的走线按层点出来，过孔单独算，方向写反不算改（S232）", () => {
+  const board = (segments, vias) =>
+    [
+      "(kicad_pcb (version 20241229) (generator pcbnew)",
+      '  (layers "F.Cu" "B.Cu")',
+      '  (net 0 "")',
+      '  (net 1 "GND")',
+      ...segments,
+      ...vias,
+      ")",
+    ].join("\n");
+  const keep = '(segment (start 1 1) (end 5 1) (width 0.2) (layer "F.Cu") (net 1))';
+  const keepReversed = '(segment (start 5 1) (end 1 1) (width 0.2) (layer "F.Cu") (net 1))';
+  const removed = '(segment (start 5 1) (end 9 1) (width 0.2) (layer "B.Cu") (net 1))';
+  const added = '(segment (start 5 1) (end 5 6) (width 0.2) (layer "B.Cu") (net 1))';
+  const via = '(via (at 3 3) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1))';
+
+  const same = analyzeDiff(board([keep, removed], []), board([keepReversed, removed], []));
+  assert.equal(same.stats.added, 0);
+  assert.equal(same.stats.removed, 0);
+  assert.ok(same.notes.some((note) => note.includes("完全一致")));
+
+  const changed = analyzeDiff(board([keep, removed], []), board([keep, added], [via]));
+  assert.equal(changed.stats.removed, 1);
+  assert.equal(changed.stats.added, 1);
+  assert.equal(changed.stats.removedMm, 4);
+  assert.equal(changed.stats.addedMm, 5);
+  assert.equal(changed.stats.addedVias, 1);
+  const byLayer = new Map(changed.layers.map((layer) => [layer.layer, layer]));
+  assert.equal(byLayer.get("B.Cu").removed, 1);
+  assert.equal(byLayer.get("B.Cu").added, 1);
+  assert.equal(byLayer.get("F.Cu").added + byLayer.get("F.Cu").removed, 0);
+  assert.equal(changed.ok, true);
+  assert.equal(changed.findings.filter((finding) => finding.id === "diff.summary").length, 1);
+
+  const svg = renderDiffSvg(board([keep, removed], []), board([keep, added], []));
+  assert.ok(svg.svg.includes("#c03a2b"), "删除的线要画成红色");
+  assert.ok(svg.svg.includes("#1f7a3f"), "新增的线要画成绿色");
+  assert.equal(svg.layers.length, 2);
+});
 test("参考面复核：走线整条压在平面上不算缺口，跨出去才算；过孔贴边记提示（S231）", () => {
   const board = (segments) =>
     [

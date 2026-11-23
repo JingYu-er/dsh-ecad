@@ -74,6 +74,7 @@ import { readEmcDeep } from "./ecad/pcb/emc-deep.js";
 import { readLayout } from "./ecad/pcb/layout-check.js";
 import { readRouting } from "./ecad/pcb/routing.js";
 import { readReference } from "./ecad/pcb/reference.js";
+import { EMPTY_DIFF, EMPTY_DIFF_SVG, readDiff, writeDiffSvgs } from "./ecad/pcb/diff.js";
 import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "./ecad/pcb/layers.js";
 import { readLinks } from "./ecad/pcb/links.js";
@@ -341,6 +342,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/layout-check",
   WEB_API_PREFIX + "/ecad/routing",
   WEB_API_PREFIX + "/ecad/reference",
+  WEB_API_PREFIX + "/ecad/diff",
   WEB_API_PREFIX + "/ecad/verify-bundle",
   WEB_API_PREFIX + "/ecad/layers",
   WEB_API_PREFIX + "/ecad/gerber",
@@ -620,6 +622,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/layout-check" &&
     path !== WEB_API_PREFIX + "/ecad/routing" &&
     path !== WEB_API_PREFIX + "/ecad/reference" &&
+    path !== WEB_API_PREFIX + "/ecad/diff" &&
     path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
     path !== WEB_API_PREFIX + "/ecad/layers" &&
     path !== WEB_API_PREFIX + "/ecad/gerber" &&
@@ -1449,6 +1452,39 @@ export async function handleWebApi(input: {
         boardFile: report.boardFile,
         stats: report.stats,
         findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
+        notes: [...report.notes],
+      },
+    });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/diff") {
+    // 改前改后对比（S232）：逐层列新增/删除，写同原点叠图。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const beforeArg = typeof query["beforeFile"] === "string" ? query["beforeFile"].trim() : "";
+    if (beforeArg === "") return fail(400, "beforeFile 不能为空：给出改之前的 .kicad_pcb 路径");
+    const beforeFile = /^[A-Za-z]:[\\/]/u.test(beforeArg) || beforeArg.startsWith("/") ? beforeArg : join(projectDir, beforeArg);
+    if (!existsSync(beforeFile)) return fail(404, "找不到改之前的板子：" + beforeFile);
+    const workspace = planEcadWorkspace(projectDir, resolveProjectLayout(projectDir).hardwareDir);
+    const latest = findLatestKicadBuild(workspace);
+    if (!latest.ok || latest.pcbFile === "") {
+      return ok({ diff: { ...EMPTY_DIFF, beforeFile, error: latest.ok ? "还没有构建产物：先构建一次" : latest.error } });
+    }
+    const report = readDiff(beforeFile, latest.pcbFile);
+    const outDir = join(workspace.outDir, "diff");
+    const svg = report.ok ? writeDiffSvgs(beforeFile, latest.pcbFile, outDir, (dir: string) => { mkdirSync(dir, { recursive: true }); }) : EMPTY_DIFF_SVG;
+    return ok({
+      diff: {
+        ok: report.ok,
+        error: report.error,
+        beforeFile: report.beforeFile,
+        afterFile: report.afterFile,
+        layers: report.layers.map((layer) => ({ ...layer })),
+        stats: report.stats,
+        findings: report.findings.map((item) => ({ ...item })),
+        svgDir: svg.ok ? svg.file : "",
+        svgLayers: svg.ok ? [...svg.layers] : [],
         notes: [...report.notes],
       },
     });

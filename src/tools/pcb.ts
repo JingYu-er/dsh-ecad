@@ -45,6 +45,7 @@ import { readEmcDeep } from "../engine/ecad/pcb/emc-deep.js";
 import { readLayout } from "../engine/ecad/pcb/layout-check.js";
 import { readRouting } from "../engine/ecad/pcb/routing.js";
 import { readReference } from "../engine/ecad/pcb/reference.js";
+import { readDiff, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
 import { readGerberSet } from "../engine/ecad/pcb/gerber.js";
@@ -74,6 +75,8 @@ export const PCB_LAYOUT_TOOL = "stm32_pcb_layout";
 export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
 /** 双向参考面复核（S231）：走线是否跨参考缺口、过孔是否贴平面边缘。 */
 export const PCB_REFERENCE_TOOL = "stm32_pcb_reference";
+/** 改前改后对比（S232）：逐层列新增/删除的走线与过孔，并写同原点叠图。 */
+export const PCB_DIFF_TOOL = "stm32_pcb_diff";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
 export const PCB_LAYERS_TOOL = "stm32_pcb_layers";
 export const PCB_GERBER_TOOL = "stm32_pcb_gerber";
@@ -1855,6 +1858,167 @@ export function registerPcbTools(ctx: DshContext): void {
       };
     },
   });
+
+  const diffTool: ToolDefinition = {
+    name: PCB_DIFF_TOOL,
+    description:
+      "改前改后对比：按层列出新增与删除的走线、过孔与长度变化，并在 out/diff 下写同原点同比例的叠图（红=删除、绿=新增）。只比几何，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        beforeFile: { type: "string", description: "改之前的 .kicad_pcb（相对工程目录或绝对路径）。" },
+        afterFile: { type: "string", description: "改之后的 .kicad_pcb；缺省取最近一次构建的板子。" },
+      },
+      required: ["beforeFile"],
+    },
+    output: {
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean" },
+          error: { type: "string" },
+          beforeFile: { type: "string" },
+          afterFile: { type: "string" },
+          layers: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                layer: { type: "string" },
+                before: { type: "number" },
+                after: { type: "number" },
+                added: { type: "number" },
+                removed: { type: "number" },
+                addedMm: { type: "number" },
+                removedMm: { type: "number" },
+              },
+              required: ["layer", "before", "after", "added", "removed", "addedMm", "removedMm"],
+            },
+          },
+          stats: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              beforeSegments: { type: "number" },
+              afterSegments: { type: "number" },
+              added: { type: "number" },
+              removed: { type: "number" },
+              addedMm: { type: "number" },
+              removedMm: { type: "number" },
+              addedVias: { type: "number" },
+              removedVias: { type: "number" },
+            },
+            required: ["beforeSegments", "afterSegments", "added", "removed", "addedMm", "removedMm", "addedVias", "removedVias"],
+          },
+          findings: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string" },
+                severity: { type: "string" },
+                message: { type: "string" },
+                fix: { type: "string" },
+              },
+              required: ["id", "severity", "message", "fix"],
+            },
+          },
+          svgDir: { type: "string" },
+          svgLayers: { type: "array", items: { type: "string" } },
+          notes: { type: "array", items: { type: "string" } },
+        },
+        required: ["ok", "error", "beforeFile", "afterFile", "layers", "stats", "findings", "svgDir", "svgLayers", "notes"],
+      },
+      render: (_args, value) => {
+        const result = value as {
+          ok: boolean;
+          error: string;
+          layers: { layer: string; added: number; removed: number }[];
+          stats: { added: number; removed: number; addedMm: number; removedMm: number; addedVias: number; removedVias: number };
+          svgDir: string;
+          svgLayers: string[];
+          notes: string[];
+        };
+        if (!result.ok) return [{ type: "text", text: "改前改后对比失败：" + result.error }];
+        const stats = result.stats;
+        const lines = [
+          "改动：新增 " + String(stats.added) + " 段（" + stats.addedMm.toFixed(1) + " mm）· 删除 "
+            + String(stats.removed) + " 段（" + stats.removedMm.toFixed(1) + " mm）· 过孔 +"
+            + String(stats.addedVias) + "/-" + String(stats.removedVias),
+        ];
+        for (const layer of result.layers) {
+          if (layer.added + layer.removed === 0) continue;
+          lines.push("- " + layer.layer + "：+" + String(layer.added) + " / -" + String(layer.removed));
+        }
+        if (result.svgDir !== "") lines.push("叠图：" + result.svgDir + "（" + result.svgLayers.join("、") + "）");
+        for (const note of result.notes) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; beforeFile?: string; afterFile?: string }, exec: ToolExec) => {
+      const empty = {
+        ok: false,
+        error: "",
+        beforeFile: "",
+        afterFile: "",
+        layers: [] as Array<Record<string, unknown>>,
+        stats: { beforeSegments: 0, afterSegments: 0, added: 0, removed: 0, addedMm: 0, removedMm: 0, addedVias: 0, removedVias: 0 },
+        findings: [] as Array<Record<string, unknown>>,
+        svgDir: "",
+        svgLayers: [] as string[],
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      const beforeArg = typeof args.beforeFile === "string" ? args.beforeFile.trim() : "";
+      if (beforeArg === "") return { ...empty, error: "beforeFile 不能为空：给出改之前的 .kicad_pcb 路径（或文件名，相对工程目录）" };
+      const beforeFile = resolve(resolved.projectDir, beforeArg);
+      if (!existsSync(beforeFile)) return { ...empty, beforeFile, error: "找不到改之前的板子：" + beforeFile };
+      let afterFile = "";
+      if (typeof args.afterFile === "string" && args.afterFile !== "") {
+        afterFile = resolve(resolved.projectDir, args.afterFile);
+      } else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, beforeFile, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        afterFile = latest.pcbFile;
+      }
+      if (!existsSync(afterFile)) return { ...empty, beforeFile, afterFile, error: "找不到改之后的板子：" + afterFile };
+      const report = readDiff(beforeFile, afterFile);
+      if (!report.ok) return { ...empty, beforeFile, afterFile, error: report.error };
+      const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+      const outDir = join(workspace.outDir, "diff");
+      const svg = writeDiffSvgs(beforeFile, afterFile, outDir, (dir: string) => { fsMkdir(dir); });
+      return {
+        ok: true,
+        error: "",
+        beforeFile: report.beforeFile,
+        afterFile: report.afterFile,
+        layers: report.layers.map((layer) => ({
+          layer: layer.layer,
+          before: layer.before,
+          after: layer.after,
+          added: layer.added,
+          removed: layer.removed,
+          addedMm: layer.addedMm,
+          removedMm: layer.removedMm,
+        })),
+        stats: report.stats,
+        findings: report.findings.map((finding) => ({ ...finding })),
+        svgDir: svg.ok ? svg.file : "",
+        svgLayers: svg.ok ? [...svg.layers] : [],
+        notes: [...report.notes, ...svg.notes, ...(svg.ok ? [] : [svg.error])],
+      };
+    },
+  };
+  ctx.tools.register(diffTool);
 
   const linksTool: ToolDefinition = {
     name: PCB_LINKS_TOOL,
