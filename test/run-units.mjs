@@ -48,6 +48,7 @@ const suites = [
   "layers-units.test.mjs",
   "bus-units.test.mjs",
   "silk-units.test.mjs",
+  "escape-units.test.mjs",
   "candidates-units.test.mjs",
   "widen-units.test.mjs",
   "ortho-units.test.mjs",

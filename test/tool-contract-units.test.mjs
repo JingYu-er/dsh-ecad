@@ -47,6 +47,7 @@ const GOLDEN = [
   "stm32_pcb_layers",
   "stm32_pcb_reference",
   "stm32_pcb_bus",
+  "stm32_pcb_escape",
   "stm32_pcb_silk",
   "stm32_pcb_candidates",
   "stm32_pcb_widen",
@@ -96,10 +97,10 @@ async function collectTools() {
   return tools;
 }
 
-test("工具链路：注册 46 个，名字、描述、参数与输出齐备", async () => {
+test("工具链路：注册 54 个，名字、描述、参数与输出齐备", async () => {
   const tools = await collectTools();
   const names = tools.map((item) => String(item.name));
-  assert.deepEqual([...names].sort(), [...GOLDEN].sort(), "工具清单与约定的 46 个不一致");
+  assert.deepEqual([...names].sort(), [...GOLDEN].sort(), "工具清单与约定的 54 个不一致");
   assert.equal(new Set(names).size, names.length, "工具名有重复");
   for (const def of tools) {
     assert.equal(typeof def.description, "string", def.name + " 缺 description");

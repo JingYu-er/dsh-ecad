@@ -78,7 +78,8 @@ import { readBuses } from "./ecad/pcb/bus.js";
 import { readSilk } from "./ecad/pcb/silk.js";
 import { compareCandidates } from "./ecad/pcb/candidates.js";
 import { planOrthogonalize } from "./ecad/pcb/ortho.js";
-import { applyWiden, planWiden } from "./ecad/pcb/widen.js";
+import { planWiden, applyWiden } from "./ecad/pcb/widen.js";
+import { readEscapes, applyEscapes } from "./ecad/pcb/escape.js";
 import { EMPTY_DIFF, EMPTY_DIFF_SVG, readDiff, writeDiffSvgs } from "./ecad/pcb/diff.js";
 import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "./ecad/pcb/layers.js";
@@ -352,6 +353,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/silk",
   WEB_API_PREFIX + "/ecad/candidates",
   WEB_API_PREFIX + "/ecad/widen",
+  WEB_API_PREFIX + "/ecad/escape",
   WEB_API_PREFIX + "/ecad/ortho",
   WEB_API_PREFIX + "/ecad/diff",
   WEB_API_PREFIX + "/ecad/verify-bundle",
@@ -637,6 +639,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/silk" &&
     path !== WEB_API_PREFIX + "/ecad/candidates" &&
     path !== WEB_API_PREFIX + "/ecad/widen" &&
+    path !== WEB_API_PREFIX + "/ecad/escape" &&
     path !== WEB_API_PREFIX + "/ecad/ortho" &&
     path !== WEB_API_PREFIX + "/ecad/diff" &&
     path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
@@ -1628,6 +1631,52 @@ export async function handleWebApi(input: {
         thin: plan.thin,
         widened: plan.widened.length,
         blocked: plan.blocked.length,
+        applied: 0,
+        notes: [...plan.notes],
+      },
+    });
+  }
+
+
+  if (path === WEB_API_PREFIX + "/ecad/escape") {
+    // 焊盘逃逸短段（S245）：默认只出计划，POST 才写盘（写前留 .bak）。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const layout = resolveProjectLayout(projectDir);
+    const workspace = planEcadWorkspace(projectDir, layout.hardwareDir);
+    const latest = findLatestKicadBuild(workspace);
+    if (!latest.ok || latest.pcbFile === "") return ok({ escape: { ok: false, error: latest.ok ? "还没有 .kicad_pcb：先构建一次。" : latest.error } });
+    const plan = readEscapes(latest.pcbFile, {});
+    if (!plan.ok) return ok({ escape: { ok: false, error: plan.error } });
+    if (method === "POST" && plan.stubs.length > 0) {
+      const text = readFileSync(latest.pcbFile, "utf8");
+      backupBoardFile(latest.pcbFile);
+      const next = applyEscapes(text, plan);
+      writeFileSync(latest.pcbFile, next.text, "utf8");
+      return ok({
+        escape: {
+          ok: true,
+          error: "",
+          boardFile: latest.pcbFile,
+          stubMm: plan.stubMm,
+          clearanceMm: plan.clearanceMm,
+          stubs: plan.stubs.length,
+          skipped: plan.skipped.length,
+          applied: next.added,
+          notes: [...plan.notes],
+        },
+      });
+    }
+    return ok({
+      escape: {
+        ok: true,
+        error: "",
+        boardFile: latest.pcbFile,
+        stubMm: plan.stubMm,
+        clearanceMm: plan.clearanceMm,
+        stubs: plan.stubs.length,
+        skipped: plan.skipped.length,
         applied: 0,
         notes: [...plan.notes],
       },
