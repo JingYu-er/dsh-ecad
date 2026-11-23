@@ -49,6 +49,7 @@ const GOLDEN = [
   "stm32_pcb_bus",
   "stm32_pcb_silk",
   "stm32_pcb_candidates",
+  "stm32_pcb_widen",
   "stm32_pcb_diff",
   "stm32_ecad_verify",
   "stm32_pcb_place",

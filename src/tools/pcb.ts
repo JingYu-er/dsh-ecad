@@ -49,6 +49,8 @@ import { readReference } from "../engine/ecad/pcb/reference.js";
 import { readBuses, type BusReport } from "../engine/ecad/pcb/bus.js";
 import { readSilk } from "../engine/ecad/pcb/silk.js";
 import { compareCandidates } from "../engine/ecad/pcb/candidates.js";
+import { applyWiden, planWiden } from "../engine/ecad/pcb/widen.js";
+import { backupBoardFile } from "../engine/ecad/pcb/hand-sync.js";
 import { readDiff, renderDiffHtml, renderDiffSvg, writeDiffSvgs } from "../engine/ecad/pcb/diff.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
@@ -82,6 +84,7 @@ export const PCB_REFERENCE_TOOL = "stm32_pcb_reference";
 export const PCB_BUS_TOOL = "stm32_pcb_bus";
 export const PCB_SILK_TOOL = "stm32_pcb_silk";
 export const PCB_CANDIDATES_TOOL = "stm32_pcb_candidates";
+export const PCB_WIDEN_TOOL = "stm32_pcb_widen";
 /** 改前改后对比（S232）：逐层列新增/删除的走线与过孔，并写同原点叠图。 */
 export const PCB_DIFF_TOOL = "stm32_pcb_diff";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
@@ -2962,6 +2965,124 @@ export function registerPcbTools(ctx: DshContext): void {
     },
     required: ["ok", "error", "boardFile", "stats", "planes", "findings", "notes"],
   };
+
+  const widenOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      boardFile: { type: "string" },
+      targetMm: { type: "number" },
+      clearanceMm: { type: "number" },
+      thin: { type: "number" },
+      widened: { type: "number" },
+      blocked: { type: "number" },
+      applied: { type: "number" },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "boardFile", "targetMm", "clearanceMm", "thin", "widened", "blocked", "applied", "notes"],
+  };
+
+  const widenTool: ToolDefinition = {
+    name: PCB_WIDEN_TOOL,
+    description:
+      "细走线加宽：把小于目标宽度的走线尽量补到目标宽度，几何上挤不下的如实列出来；apply 才写盘（先留 .bak）。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        targetMm: { type: "number", description: "目标线宽，默认 0.2 mm。" },
+        clearanceMm: { type: "number", description: "判挤不下时用的间距，默认 0.2 mm。" },
+        apply: { type: "boolean", description: "是否真的写回板子；默认 false 只出计划。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: widenOutput,
+      render: (result: Record<string, unknown>) => {
+        const lines: string[] = [];
+        lines.push("细走线加宽：" + String(result.boardFile));
+        lines.push(
+          "目标 " + String(result.targetMm) + " mm（间距 " + String(result.clearanceMm) + " mm）：细线 " +
+            String(result.thin) + " 段，可加宽 " + String(result.widened) + " 段，挤不下 " + String(result.blocked) + " 段，已写回 " +
+            String(result.applied) + " 段",
+        );
+        for (const note of result.notes as string[]) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\n") }];
+      },
+    },
+    timeoutMs: 60_000,
+    isConcurrencySafe: () => true,
+    execute: async (
+      args: { projectDir?: string; boardFile?: string; targetMm?: number; clearanceMm?: number; apply?: boolean },
+      exec: ToolExec,
+    ) => {
+      const empty = {
+        ok: false,
+        error: "",
+        boardFile: "",
+        targetMm: args.targetMm ?? 0.2,
+        clearanceMm: args.clearanceMm ?? 0.2,
+        thin: 0,
+        widened: 0,
+        blocked: 0,
+        applied: 0,
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") boardFile = resolve(resolved.projectDir, args.boardFile);
+      else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
+      const text = readFileSync(boardFile, "utf8");
+      const plan = planWiden(text, { targetMm: empty.targetMm, clearanceMm: empty.clearanceMm });
+      if (!plan.ok) return { ...empty, boardFile, error: plan.error };
+      let applied = 0;
+      if (args.apply === true && plan.widened.length > 0) {
+        const backup = backupBoardFile(boardFile);
+        const next = applyWiden(text, plan);
+        writeFileSync(boardFile, next.text, "utf8");
+        applied = next.applied;
+        const notes = [...plan.notes];
+        if (backup !== "") notes.push("原板已备份：" + backup);
+        if (next.missed > 0) notes.push("有 " + String(next.missed) + " 段在计划里但没找到对应文本，未改。");
+        return {
+          ok: true,
+          error: "",
+          boardFile,
+          targetMm: plan.targetMm,
+          clearanceMm: plan.clearanceMm,
+          thin: plan.thin,
+          widened: plan.widened.length,
+          blocked: plan.blocked.length,
+          applied,
+          notes,
+        };
+      }
+      return {
+        ok: true,
+        error: "",
+        boardFile,
+        targetMm: plan.targetMm,
+        clearanceMm: plan.clearanceMm,
+        thin: plan.thin,
+        widened: plan.widened.length,
+        blocked: plan.blocked.length,
+        applied: 0,
+        notes: [...plan.notes],
+      };
+    },
+  };
+  ctx.tools.register(widenTool);
 
   const candidatesOutput: JsonSchema = {
     type: "object",
