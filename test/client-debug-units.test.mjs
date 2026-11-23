@@ -459,3 +459,11 @@ test("电路设计页能看布线工整度（S227）", () => {
   assert.ok(source.includes("\"布线工整度\""), "页面上要有这一块");
   assert.ok(source.includes("useRouting(projectDir)"), "面板里要真的调用");
 });
+
+test("电路设计页能看参考面复核（S231）", () => {
+  const source = readFileSync(new URL("../client/client.js", import.meta.url), "utf8");
+  assert.ok(source.includes("function useReference("), "参考面要走自己的 hook");
+  assert.ok(source.includes("ecad/reference?projectDir="), "参考面要从 /ecad/reference 拉");
+  assert.ok(source.includes("\"参考面\""), "页面上要有这一块");
+  assert.ok(source.includes("useReference(projectDir)"), "面板里要真的调用");
+});

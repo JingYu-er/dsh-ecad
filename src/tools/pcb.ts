@@ -44,6 +44,7 @@ import { analyzeEmc, defaultCurrentForNet, requiredWidthMm } from "../engine/eca
 import { readEmcDeep } from "../engine/ecad/pcb/emc-deep.js";
 import { readLayout } from "../engine/ecad/pcb/layout-check.js";
 import { readRouting } from "../engine/ecad/pcb/routing.js";
+import { readReference } from "../engine/ecad/pcb/reference.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "../engine/ecad/pcb/layers.js";
 import { readLinks } from "../engine/ecad/pcb/links.js";
 import { readGerberSet } from "../engine/ecad/pcb/gerber.js";
@@ -71,6 +72,8 @@ export const PCB_MECH_TOOL = "stm32_mech";
 export const PCB_LINKS_TOOL = "stm32_pcb_links";
 export const PCB_LAYOUT_TOOL = "stm32_pcb_layout";
 export const PCB_ROUTING_TOOL = "stm32_pcb_routing";
+/** 双向参考面复核（S231）：走线是否跨参考缺口、过孔是否贴平面边缘。 */
+export const PCB_REFERENCE_TOOL = "stm32_pcb_reference";
 /** 逐层物理图：每层一张，同原点同比例（S230）。 */
 export const PCB_LAYERS_TOOL = "stm32_pcb_layers";
 export const PCB_GERBER_TOOL = "stm32_pcb_gerber";
@@ -2587,6 +2590,143 @@ export function registerPcbTools(ctx: DshContext): void {
     },
   };
   ctx.tools.register(routingTool);
+
+  const referenceOutput: JsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      ok: { type: "boolean" },
+      error: { type: "string" },
+      boardFile: { type: "string" },
+      stats: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          segments: { type: "number" },
+          checked: { type: "number" },
+          gaps: { type: "number" },
+          viaNearEdges: { type: "number" },
+          trackNearEdges: { type: "number" },
+        },
+        required: ["segments", "checked", "gaps", "viaNearEdges", "trackNearEdges"],
+      },
+      planes: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            layer: { type: "string" },
+            net: { type: "string" },
+            polygons: { type: "number" },
+          },
+          required: ["layer", "net", "polygons"],
+        },
+      },
+      findings: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string" },
+            severity: { type: "string" },
+            message: { type: "string" },
+            fix: { type: "string" },
+          },
+          required: ["id", "severity", "message", "fix"],
+        },
+      },
+      notes: { type: "array", items: { type: "string" } },
+    },
+    required: ["ok", "error", "boardFile", "stats", "planes", "findings", "notes"],
+  };
+
+  const referenceTool: ToolDefinition = {
+    name: PCB_REFERENCE_TOOL,
+    description:
+      "双向参考面复核：非电源网走线沿线取五个点，投影到相邻铜层已填充的平面，跨出参考面记缺口；走线离平面边缘、过孔离平面边缘过近记提示。只看几何，不改板子。",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        projectDir: { type: "string", description: "工程根目录；缺省为当前调试会话的工程。" },
+        boardFile: { type: "string", description: "指定 .kicad_pcb；缺省取最近一次构建的板子。" },
+        trackNearMm: { type: "number", description: "走线中点离平面边界多近算「贴边」，默认 0.3 mm。" },
+      },
+      required: [],
+    },
+    output: {
+      schema: referenceOutput,
+      render: (_args, value) => {
+        const result = value as {
+          ok: boolean;
+          error: string;
+          stats: { segments: number; checked: number; gaps: number; viaNearEdges: number; trackNearEdges: number };
+          planes: { layer: string; net: string }[];
+          findings: { severity: string; message: string; fix: string }[];
+          notes: string[];
+        };
+        if (!result.ok) return [{ type: "text", text: "参考面复核失败：" + result.error }];
+        const stats = result.stats;
+        const lines: string[] = [
+          "参考面复核：" + String(stats.checked) + "/" + String(stats.segments) + " 段可判 · 跨出参考面 "
+            + String(stats.gaps) + " · 走线贴边 " + String(stats.trackNearEdges) + " · 过孔贴边 "
+            + String(stats.viaNearEdges),
+        ];
+        for (const plane of result.planes) lines.push("平面：" + plane.layer + " → " + plane.net);
+        const shown = result.findings.slice(0, 6);
+        for (const finding of shown) lines.push((finding.severity === "warning" ? "告警" : "提示") + "：" + finding.message + " → " + finding.fix);
+        if (result.findings.length > shown.length) lines.push("…还有 " + String(result.findings.length - shown.length) + " 条");
+        for (const note of result.notes) lines.push("说明：" + note);
+        return [{ type: "text", text: lines.join("\\n") }];
+      },
+    },
+    timeoutMs: 30_000,
+    isConcurrencySafe: () => true,
+    execute: async (args: { projectDir?: string; boardFile?: string; trackNearMm?: number }, exec: ToolExec) => {
+      const empty = {
+        ok: false,
+        error: "",
+        boardFile: "",
+        stats: { segments: 0, checked: 0, gaps: 0, viaNearEdges: 0, trackNearEdges: 0 },
+        planes: [] as Array<{ layer: string; net: string; polygons: number }>,
+        findings: [] as Array<Record<string, unknown>>,
+        notes: [] as string[],
+      };
+      const resolved = await resolveProjectDir(ctx, args.projectDir, exec);
+      if (resolved.projectDir === "") return { ...empty, error: "projectDir 不能为空：从工具栏「工程」下拉里选一个，或先打开调试会话" };
+      let boardFile = "";
+      if (typeof args.boardFile === "string" && args.boardFile !== "") {
+        boardFile = resolve(resolved.projectDir, args.boardFile);
+      } else {
+        const workspace = planEcadWorkspace(resolved.projectDir, join(resolved.projectDir, "hardware"));
+        const latest = findLatestKicadBuild(workspace);
+        if (!latest.ok || latest.pcbFile === "") return { ...empty, error: latest.ok ? "还没有构建产物：先跑一次 stm32_ecad_build" : latest.error };
+        boardFile = latest.pcbFile;
+      }
+      if (!existsSync(boardFile)) return { ...empty, boardFile, error: "找不到板子文件：" + boardFile };
+      const report = readReference(boardFile, {
+        ...(typeof args.trackNearMm === "number" ? { trackNearMm: args.trackNearMm } : {}),
+      });
+      if (!report.ok) return { ...empty, boardFile, error: report.error };
+      return {
+        ok: true,
+        error: "",
+        boardFile: report.boardFile,
+        stats: report.stats,
+        planes: report.planes.map((plane) => ({ layer: plane.layer, net: plane.net, polygons: plane.polygons })),
+        findings: report.findings.map((finding) => ({
+          id: finding.id,
+          severity: finding.severity,
+          message: finding.message,
+          fix: finding.fix,
+        })),
+        notes: [...report.notes],
+      };
+    },
+  };
+  ctx.tools.register(referenceTool);
 
   const render3dOutput: JsonSchema = {
     type: "object",

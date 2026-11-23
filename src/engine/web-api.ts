@@ -73,6 +73,7 @@ import { analyzeEmc } from "./ecad/pcb/emc.js";
 import { readEmcDeep } from "./ecad/pcb/emc-deep.js";
 import { readLayout } from "./ecad/pcb/layout-check.js";
 import { readRouting } from "./ecad/pcb/routing.js";
+import { readReference } from "./ecad/pcb/reference.js";
 import { EMPTY_BUNDLE, verifyBundle } from "./ecad/deliver.js";
 import { EMPTY_LAYERS, exportLayerSvgs } from "./ecad/pcb/layers.js";
 import { readLinks } from "./ecad/pcb/links.js";
@@ -339,6 +340,7 @@ export const WEB_API_PATHS: readonly string[] = [
   WEB_API_PREFIX + "/ecad/links",
   WEB_API_PREFIX + "/ecad/layout-check",
   WEB_API_PREFIX + "/ecad/routing",
+  WEB_API_PREFIX + "/ecad/reference",
   WEB_API_PREFIX + "/ecad/verify-bundle",
   WEB_API_PREFIX + "/ecad/layers",
   WEB_API_PREFIX + "/ecad/gerber",
@@ -617,6 +619,7 @@ export async function handleWebApi(input: {
     path !== WEB_API_PREFIX + "/ecad/links" &&
     path !== WEB_API_PREFIX + "/ecad/layout-check" &&
     path !== WEB_API_PREFIX + "/ecad/routing" &&
+    path !== WEB_API_PREFIX + "/ecad/reference" &&
     path !== WEB_API_PREFIX + "/ecad/verify-bundle" &&
     path !== WEB_API_PREFIX + "/ecad/layers" &&
     path !== WEB_API_PREFIX + "/ecad/gerber" &&
@@ -1446,6 +1449,39 @@ export async function handleWebApi(input: {
         boardFile: report.boardFile,
         stats: report.stats,
         findings: report.findings.map((item) => ({ ...item, refs: [...item.refs] })),
+        notes: [...report.notes],
+      },
+    });
+  }
+
+  if (path === WEB_API_PREFIX + "/ecad/reference") {
+    // 双向参考面复核（S231）：走线跨出相邻层平面记缺口，贴边记提示。
+    const requested = typeof query["projectDir"] === "string" ? query["projectDir"].trim() : "";
+    const projectDir = withProject(requested);
+    if (projectDir === "") return fail(400, PROJECT_DIR_REQUIRED);
+    const layout = resolveProjectLayout(projectDir);
+    const workspace = planEcadWorkspace(projectDir, layout.hardwareDir);
+    const latest = findLatestKicadBuild(workspace);
+    const emptyReference = {
+      ok: false,
+      error: latest.ok ? "还没有 .kicad_pcb：先构建一次，或在 KiCad 里存一次板子。" : latest.error,
+      boardFile: "",
+      stats: { segments: 0, checked: 0, gaps: 0, viaNearEdges: 0, trackNearEdges: 0 },
+      planes: [] as Array<Record<string, unknown>>,
+      findings: [] as Array<Record<string, unknown>>,
+      notes: [] as string[],
+    };
+    if (!latest.ok || latest.pcbFile === "") return ok({ reference: emptyReference });
+    const report = readReference(latest.pcbFile);
+    if (!report.ok) return ok({ reference: { ...emptyReference, boardFile: latest.pcbFile, error: report.error } });
+    return ok({
+      reference: {
+        ok: true,
+        error: "",
+        boardFile: report.boardFile,
+        stats: report.stats,
+        planes: report.planes.map((plane) => ({ layer: plane.layer, net: plane.net, polygons: plane.polygons })),
+        findings: report.findings.map((item) => ({ ...item })),
         notes: [...report.notes],
       },
     });

@@ -6,6 +6,7 @@
 
 import assert from "node:assert/strict";
 import { coverageOf } from "../lib/engine/ecad/pcb/coverage.js";
+import { analyzeReference } from "../lib/engine/ecad/pcb/reference.js";
 import { readRouting } from "../lib/engine/ecad/pcb/routing.js";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -3029,6 +3030,45 @@ test("布线工整度：直角、锐角、焊盘斜拉、单网多换孔各点�
   assert.equal(bare.stats.tracks, 0);
   assert.equal(bare.ok, true);
   assert.equal(bare.notes.some((note) => note.includes("没有走线")), true);
+});
+
+test("参考面复核：走线整条压在平面上不算缺口，跨出去才算；过孔贴边记提示（S231）", () => {
+  const board = (segments) =>
+    [
+      "(kicad_pcb (version 20241229) (generator pcbnew)",
+      '  (layers "F.Cu" "B.Cu")',
+      '  (net 0 "")',
+      '  (net 1 "GND")',
+      '  (net 2 "SIG")',
+      ...segments,
+      '  (zone (net 1) (net_name "GND") (layer "B.Cu") (hatch edge 0.5)',
+      '    (filled_polygon (layer "B.Cu") (pts (xy 0 0) (xy 20 0) (xy 20 20) (xy 0 20)))',
+      "  )",
+      ")",
+    ].join("\n");
+  // 层名必须带引号：KiCad 10 写的是 (layer "F.Cu")，不带引号解析器取不到层。
+  const inside = `(segment (start 5 5) (end 15 5) (width 0.2) (layer "F.Cu") (net 2))`;
+  // 大部分在线外：五个采样点只有 1 个落在平面上，覆盖率 0.2，判「跨出参考面」而不是「擦过缺口」。
+  const crossing = `(segment (start 15 5) (end 40 5) (width 0.2) (layer "F.Cu") (net 2))`;
+  const viaNear = "(via (at 19.6 10) (size 0.6) (drill 0.3) (layers \"F.Cu\" \"B.Cu\") (net 2))";
+
+  const ok = analyzeReference(board([inside]));
+  assert.equal(ok.stats.checked, 1);
+  assert.equal(ok.stats.gaps, 0);
+  assert.equal(ok.findings.filter((item) => item.id === "reference.gap").length, 0);
+
+  const bad = analyzeReference(board([crossing]));
+  assert.equal(bad.stats.gaps, 1);
+  assert.equal(bad.findings.filter((item) => item.id === "reference.gap").length, 1);
+  assert.equal(bad.ok, false);
+
+  const edge = analyzeReference(board([inside, viaNear]));
+  assert.equal(edge.stats.viaNearEdges, 1);
+  assert.equal(edge.findings.filter((item) => item.id === "reference.via-near-edge").length, 1);
+
+  const empty = analyzeReference("(kicad_pcb (version 20241229) (generator pcbnew)\n  (layers \"F.Cu\" \"B.Cu\")\n)\n");
+  assert.equal(empty.stats.gaps, 0);
+  assert.ok(empty.notes.some((note) => note.includes("没有已填充的铺铜平面层")));
 });
 
 test("覆盖记录：每层做了什么按最终板子数，空层与未填充都点出来（S228）", () => {
