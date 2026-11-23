@@ -394,7 +394,12 @@ export function writeDiffSvgs(beforeFile: string, afterFile: string, outDir: str
   try {
     const beforeText = readText(beforeFile);
     const afterText = readText(afterFile);
-    mkdir(outDir);
+    // 目录已存在是常态（同一工程反复对比），建目录失败不该让整次对比失败。
+    try {
+      mkdir(outDir);
+    } catch {
+      // ignore EEXIST
+    }
     const result = renderDiffSvg(beforeText, afterText);
     const written: string[] = [];
     for (const layer of result.layers) {
