@@ -157,7 +157,15 @@ export function readGerberSet(dir: string, options: GerberOptions = {}): GerberV
     for (const note of parsed.notes) notes.push(file + "：" + note);
   }
   if (layers.length === 0) return { ...EMPTY, dir, error: "只找到钻孔文件：铜层与板框一个都没读到" };
-  return render(layers, holes, options, dir, drillHoles, notes);
+  // Fab / Courtyard 这类文档层会把「Drill Map」之类的说明文字画进图里，默认不画；
+  // 显式用 layers 点名时才画。它们不参与任何判据，留着只会让人以为板上真有这些字。
+  const documented = layers.filter((layer) => layer.kind === "other");
+  const drawn = wanted.length === 0 ? layers.filter((layer) => layer.kind !== "other") : layers;
+  if (drawn.length === 0) return { ...EMPTY, dir, error: "只找到文档层（Fab / Courtyard）：看不到铜与板框" };
+  if (documented.length > 0 && wanted.length === 0) {
+    notes.push("文档层没有画：" + documented.map((layer) => layer.name).join("、") + "（要看得在 layers 里点名）");
+  }
+  return render(drawn, holes, options, dir, drillHoles, notes);
 }
 
 function render(
